@@ -1,10 +1,10 @@
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import MainPage from './pages/page';
+import LoginPage from './pages/login/page';
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <MainPage />
+      <LoginPage />
     </SafeAreaProvider>
   );
 }
