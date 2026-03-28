@@ -16,7 +16,11 @@ import {
 const DESIGN_SCREEN_WIDTH = 375;
 const DESIGN_SCREEN_HEIGHT = 812;
 
-export default function LoginPage() {
+type LoginPageProps = {
+  onSubmit?: () => void;
+};
+
+export default function LoginPage({ onSubmit }: LoginPageProps) {
   const [agreed, setAgreed] = useState(false);
   const [phone, setPhone] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
@@ -214,6 +218,10 @@ export default function LoginPage() {
         </View>
 
         <Pressable
+          onPress={() => {
+            Keyboard.dismiss();
+            onSubmit?.();
+          }}
           style={[
             styles.loginButtonWrap,
             {
