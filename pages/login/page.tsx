@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -24,6 +24,7 @@ export default function LoginPage({ onSubmit }: LoginPageProps) {
   const [agreed, setAgreed] = useState(false);
   const [phone, setPhone] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
+  const [countdown, setCountdown] = useState(0);
   const phoneInputRef = useRef<TextInput>(null);
   const verificationCodeInputRef = useRef<TextInput>(null);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -50,6 +51,23 @@ export default function LoginPage({ onSubmit }: LoginPageProps) {
   const dismissInput = (inputRef: React.RefObject<TextInput | null>) => {
     inputRef.current?.blur();
     Keyboard.dismiss();
+  };
+
+  useEffect(() => {
+    if (countdown <= 0) return;
+
+    const timer = setTimeout(() => {
+      setCountdown((current) => current - 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const handleGetCodePress = () => {
+    if (countdown > 0) return;
+
+    Keyboard.dismiss();
+    setCountdown(60);
   };
 
   return (
@@ -148,10 +166,7 @@ export default function LoginPage({ onSubmit }: LoginPageProps) {
               {
                 paddingLeft: 20 * scaleX,
                 paddingRight: 20 * scaleX,
-                paddingTop: 13 * scaleY,
-                paddingBottom: 9 * scaleY,
                 fontSize: 14 * textScale,
-                lineHeight: 18.56 * textScale,
               },
             ]}
             value={phone}
@@ -186,16 +201,16 @@ export default function LoginPage({ onSubmit }: LoginPageProps) {
               styles.verificationInput,
               {
                 paddingLeft: 20 * scaleX,
-                paddingTop: 13 * scaleY,
-                paddingBottom: 9 * scaleY,
                 fontSize: 14 * textScale,
-                lineHeight: 18.56 * textScale,
               },
             ]}
             value={verificationCode}
           />
           <Pressable
+            accessibilityState={{ disabled: countdown > 0 }}
+            disabled={countdown > 0}
             hitSlop={8}
+            onPress={handleGetCodePress}
             style={[
               styles.getCodeButton,
               {
@@ -206,13 +221,14 @@ export default function LoginPage({ onSubmit }: LoginPageProps) {
             <Text
               style={[
                 styles.getCodeText,
+                countdown > 0 && styles.getCodeTextDisabled,
                 {
                   fontSize: 14 * textScale,
                   lineHeight: 18.56 * textScale,
                 },
               ]}
             >
-              获取验证码
+              {countdown > 0 ? `${countdown}秒后重试` : '获取验证码'}
             </Text>
           </Pressable>
         </View>
@@ -432,10 +448,14 @@ const styles = StyleSheet.create({
   inputText: {
     flex: 1,
     height: '100%',
+    paddingTop: 0,
+    paddingBottom: 0,
     paddingVertical: 0,
     fontWeight: '400',
+    includeFontPadding: false,
     letterSpacing: 0,
     color: 'rgba(56, 56, 56, 1)',
+    textAlignVertical: 'center',
   },
   verificationInput: {
     paddingRight: 0,
@@ -450,6 +470,9 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     letterSpacing: 0,
     color: 'rgba(35, 188, 163, 1)',
+  },
+  getCodeTextDisabled: {
+    color: 'rgba(153, 153, 153, 1)',
   },
   loginButtonWrap: {
     position: 'absolute',
