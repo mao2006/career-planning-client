@@ -1,13 +1,21 @@
 import { useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AiAnalysisEntryPage from './pages/ai-analysis-entry/page';
+import EmploymentProfilePage from './pages/employment-profile/page';
 import IdentityDetailPage from './pages/identity-detail/page';
 import IdentityMorePage from './pages/identity-more/page';
 import LoginPage from './pages/login/page';
 import SelectIdentityPage from './pages/select-identity/page';
 import SplashPage from './pages/splash/page';
 
-type ScreenKey = 'splash' | 'login' | 'next' | 'identityDetail' | 'identityMore' | 'aiAnalysisEntry';
+type ScreenKey =
+  | 'splash'
+  | 'login'
+  | 'next'
+  | 'identityDetail'
+  | 'identityMore'
+  | 'aiAnalysisEntry'
+  | 'employmentProfile';
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenKey>('splash');
@@ -27,8 +35,13 @@ export default function App() {
           onBack={() => setScreen('identityDetail')}
           onNavigate={() => setScreen('aiAnalysisEntry')}
         />
+      ) : screen === 'aiAnalysisEntry' ? (
+        <AiAnalysisEntryPage
+          onBack={() => setScreen('identityMore')}
+          onNavigate={() => setScreen('employmentProfile')}
+        />
       ) : (
-        <AiAnalysisEntryPage onBack={() => setScreen('identityMore')} />
+        <EmploymentProfilePage onBack={() => setScreen('aiAnalysisEntry')} />
       )}
     </SafeAreaProvider>
   );

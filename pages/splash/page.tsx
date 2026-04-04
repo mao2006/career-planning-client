@@ -48,7 +48,7 @@ export default function SplashPage({
     <Animated.View style={[styles.screen, { opacity }]}>
       <StatusBar style="dark" />
       <Image
-        source={require('../../assets/firstscreen.png')}
+        source={require('../../assets/new-homepage.png')}
         style={[
           styles.coverImage,
           {

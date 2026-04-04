@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
-import BottomArrowNavigation from '../../components/bottom-arrow-navigation';
+import BottomArrowNavigation, { STANDARD_ARROW_BOTTOM } from '../../components/bottom-arrow-navigation';
 
 const DESIGN_SCREEN_WIDTH = 375;
 const DESIGN_SCREEN_HEIGHT = 812;
@@ -108,7 +108,7 @@ export default function NextPage({ onBack, onNavigate }: NextPageProps) {
       </View>
 
       <BottomArrowNavigation
-        bottom={18 * scaleY}
+        bottom={STANDARD_ARROW_BOTTOM * scaleY}
         hideLeft
         onLeftPress={onBack}
         onRightPress={onNavigate}

@@ -1,6 +1,8 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+export const STANDARD_ARROW_BOTTOM = 73;
+
 type BottomArrowNavigationProps = {
   bottom?: number;
   hideLeft?: boolean;
@@ -66,11 +68,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    zIndex: 20,
+    elevation: 20,
   },
   navArrowButton: {
     width: 56,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 21,
+    elevation: 21,
   },
 });
