@@ -61,6 +61,7 @@ const routeItems: RouteItem[] = [
 export default function MainPage() {
   const [activeRoute, setActiveRoute] = useState<RouteKey>('home');
   const [isHomeDetailVisible, setIsHomeDetailVisible] = useState(false);
+  const [isMineDetailVisible, setIsMineDetailVisible] = useState(false);
   const insets = useSafeAreaInsets();
 
   const triggerRouteHaptic = (kind: 'switch' | 'tap') => {
@@ -105,7 +106,7 @@ export default function MainPage() {
       return <PlanPage />;
     }
 
-    return <MinePage />;
+    return <MinePage onDetailVisibilityChange={setIsMineDetailVisible} />;
   };
 
   return (
@@ -121,7 +122,7 @@ export default function MainPage() {
         {renderActivePage()}
       </View>
 
-      {!isHomeDetailVisible ? (
+      {!isHomeDetailVisible && !isMineDetailVisible ? (
         <View
           style={[
             styles.bottomBarWrap,
