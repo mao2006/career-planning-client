@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function Page5() {
+export default function PlanPage() {
   return (
     <View style={styles.pageWrap}>
-      <Text style={styles.pageText}>5</Text>
+      <Text style={styles.pageText}>规划</Text>
     </View>
   );
 }

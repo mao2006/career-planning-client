@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function Page4() {
+export default function AiAssistantPage() {
   return (
     <View style={styles.pageWrap}>
-      <Text style={styles.pageText}>4</Text>
+      <Text style={styles.pageText}>AI小助手</Text>
     </View>
   );
 }

@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function Page3() {
+export default function ProfilePage() {
   return (
     <View style={styles.pageWrap}>
-      <Text style={styles.pageText}>3</Text>
+      <Text style={styles.pageText}>画像</Text>
     </View>
   );
 }

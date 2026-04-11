@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function Page1() {
+export default function MinePage() {
   return (
     <View style={styles.pageWrap}>
-      <Text style={styles.pageText}>1</Text>
+      <Text style={styles.pageText}>我的</Text>
     </View>
   );
 }
