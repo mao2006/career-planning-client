@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -9,6 +10,7 @@ import Svg, {
 } from 'react-native-svg';
 
 import BottomArrowNavigation from '../../components/bottom-arrow-navigation';
+import AiAssistantPage from '../ai-assistant/page';
 
 const DESIGN_SCREEN_WIDTH = 375;
 const DESIGN_SCREEN_HEIGHT = 812;
@@ -79,6 +81,7 @@ function GradientWord({ fontSize, gradientId, lineHeight, text, width }: Gradien
 }
 
 export default function AiAnalysisEntryPage({ onBack, onNavigate }: AiAnalysisEntryPageProps) {
+  const [assistantVisible, setAssistantVisible] = useState(false);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const scaleX = screenWidth / DESIGN_SCREEN_WIDTH;
   const scaleY = screenHeight / DESIGN_SCREEN_HEIGHT;
@@ -90,6 +93,10 @@ export default function AiAnalysisEntryPage({ onBack, onNavigate }: AiAnalysisEn
   const getCenteredLeft = (width: number) => (screenWidth - width * scaleX) / 2;
   const shineButtonCenterY = getShiftedTop(SHINE_BUTTON_TOP) + (SHINE_BUTTON_HEIGHT * scaleY) / 2;
   const arrowBottom = Math.max(0, screenHeight - shineButtonCenterY - ARROW_BUTTON_SIZE / 2);
+
+  if (assistantVisible) {
+    return <AiAssistantPage mode="standalone" onBack={() => setAssistantVisible(false)} />;
+  }
 
   return (
     <LinearGradient
@@ -183,9 +190,8 @@ export default function AiAnalysisEntryPage({ onBack, onNavigate }: AiAnalysisEn
       </Text>
 
       <Pressable
-        disabled={!onNavigate}
         hitSlop={12}
-        onPress={onNavigate}
+        onPress={() => setAssistantVisible(true)}
         style={[
           styles.shineButtonWrap,
           {

@@ -61,6 +61,7 @@ const routeItems: RouteItem[] = [
 export default function MainPage() {
   const [activeRoute, setActiveRoute] = useState<RouteKey>('home');
   const [isHomeDetailVisible, setIsHomeDetailVisible] = useState(false);
+  const [isPlanDetailVisible, setIsPlanDetailVisible] = useState(false);
   const [isMineDetailVisible, setIsMineDetailVisible] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -103,7 +104,7 @@ export default function MainPage() {
     }
 
     if (activeRoute === 'plan') {
-      return <PlanPage />;
+      return <PlanPage onDetailVisibilityChange={setIsPlanDetailVisible} />;
     }
 
     return <MinePage onDetailVisibilityChange={setIsMineDetailVisible} />;
@@ -122,7 +123,7 @@ export default function MainPage() {
         {renderActivePage()}
       </View>
 
-      {!isHomeDetailVisible && !isMineDetailVisible ? (
+      {!isHomeDetailVisible && !isPlanDetailVisible && !isMineDetailVisible ? (
         <View
           style={[
             styles.bottomBarWrap,

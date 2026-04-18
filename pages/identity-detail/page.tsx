@@ -1,6 +1,8 @@
 import { type ReactNode, useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -13,12 +15,18 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import BottomArrowNavigation, { STANDARD_ARROW_BOTTOM } from '../../components/bottom-arrow-navigation';
+import BottomArrowNavigation from '../../components/bottom-arrow-navigation';
 import IdentityScreenBackground from '../../components/identity-screen-background';
 
-const DESIGN_SCREEN_WIDTH = 375;
-const DESIGN_SCREEN_HEIGHT = 812;
+const PAGE_MAX_WIDTH = 430;
+const RESUME_FILE_TYPES = [
+  'image/*',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
 
 const BASE_FIELDS = [
   { key: 'name', label: '姓名', placeholder: '请输入姓名' },
@@ -158,12 +166,24 @@ const COMMON_CHINESE_UNIVERSITIES = [
 ] as const;
 
 const PROFILE_FIELDS = [
-  { key: 'certificate', label: '证书', placeholder: '请输入证书' },
-  { key: 'skill', label: '技能', placeholder: '请输入技能' },
-  { key: 'honor', label: '荣誉', placeholder: '请输入获得荣誉' },
-  { key: 'experience', label: '经历', placeholder: '请输入经历' },
-  { key: 'targetJob', label: '目标岗位', placeholder: '请输入目标岗位' },
+  { key: 'certificate', label: '证书', minHeight: 54, placeholder: '请输入证书' },
+  { key: 'skill', label: '技能', minHeight: 78, placeholder: '请输入技能' },
+  { key: 'honor', label: '荣誉', minHeight: 70, placeholder: '请输入获得荣誉' },
+  { key: 'experience', label: '经历', minHeight: 92, placeholder: '请输入经历' },
+  { key: 'targetJob', label: '目标岗位', minHeight: 76, placeholder: '请输入目标岗位' },
 ] as const;
+
+const RESUME_AUTOFILL_VALUES = {
+  certificate: '全国计算机二级、大学英语四级、软考程序员',
+  experience:
+    '已完成数据结构课程设计、1 次团队协作开发、1 个 Linux + C++ mini 项目，具备持续学习和工程化落地能力。',
+  honor: '学习吸收快、执行节奏稳，具备工程实现型潜力，适合从研发主线切入。',
+  major: '车辆工程',
+  name: '毛健辉',
+  school: '浙江工业大学',
+  skill: 'C++ / C、数据结构与算法、Linux 开发环境、Git 协作、调试定位、计算机网络基础',
+  targetJob: 'C++ 开发工程师 / 后端开发工程师 / 嵌入式开发工程师',
+} as const;
 
 type IdentityDetailPageProps = {
   onBack?: () => void;
@@ -185,6 +205,7 @@ type InputRowProps = {
   isLast?: boolean;
   label: string;
   minHeight: number;
+  multiline?: boolean;
   onChangeText: (text: string) => void;
   onFocus?: () => void;
   placeholder: string;
@@ -214,6 +235,7 @@ function InputRow({
   isLast = false,
   label,
   minHeight,
+  multiline = false,
   onChangeText,
   onFocus,
   placeholder,
@@ -227,16 +249,19 @@ function InputRow({
           minHeight,
           borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
         },
+        multiline && styles.infoRowMultiline,
       ]}
     >
-      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={[styles.infoLabel, multiline && styles.infoLabelMultiline]}>{label}</Text>
 
       <TextInput
+        multiline={multiline}
         onChangeText={onChangeText}
         onFocus={onFocus}
         placeholder={placeholder}
         placeholderTextColor="rgba(166, 166, 166, 1)"
-        style={styles.fieldInput}
+        scrollEnabled={false}
+        style={[styles.fieldInput, multiline && styles.fieldInputMultiline]}
         value={value}
       />
     </View>
@@ -287,11 +312,7 @@ function SchoolInputRow({
 
       {visible ? (
         <View style={[styles.schoolDropdown, { top: minHeight + 6 }]}>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-            style={styles.schoolDropdownScroll}
-          >
+          <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.schoolDropdownScroll}>
             {suggestions.length > 0 ? (
               suggestions.map((school, index) => (
                 <Pressable
@@ -340,9 +361,12 @@ export default function IdentityDetailPage({ onBack, onNavigate }: IdentityDetai
     skill: '',
     targetJob: '',
   });
+  const [importedResumeName, setImportedResumeName] = useState('');
   const [schoolDropdownVisible, setSchoolDropdownVisible] = useState(false);
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const pageScale = Math.min(screenWidth / DESIGN_SCREEN_WIDTH, screenHeight / DESIGN_SCREEN_HEIGHT);
+  const { width: screenWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const scaleX = screenWidth / 375;
+  const contentWidth = Math.min(screenWidth - 30, PAGE_MAX_WIDTH);
   const schoolKeyword = formValues.school.trim();
   const filteredSchoolSuggestions =
     schoolKeyword.length > 0
@@ -378,117 +402,147 @@ export default function IdentityDetailPage({ onBack, onNavigate }: IdentityDetai
     setSchoolDropdownVisible(false);
   };
 
+  const handleResumeImport = async () => {
+    closeSchoolDropdown();
+    Keyboard.dismiss();
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: RESUME_FILE_TYPES,
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      setImportedResumeName(asset.name || '已导入简历');
+      setFormValues((current) => ({
+        ...current,
+        ...RESUME_AUTOFILL_VALUES,
+      }));
+
+      Alert.alert('简历已导入', '已根据当前能力画像自动填充档案内容，你可以继续微调后进入下一步。');
+    } catch (error) {
+      Alert.alert('导入失败', '暂时无法读取简历文件，请稍后重试。');
+    }
+  };
+
   return (
     <IdentityScreenBackground>
       <TouchableWithoutFeedback accessible={false} onPress={handleOutsidePress}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-          style={styles.keyboardAvoidingView}
-        >
-          <ScrollView
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            style={styles.screenScroll}
-            contentContainerStyle={styles.scrollContent}
+        <View style={styles.screen}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+            style={styles.keyboardAvoidingView}
           >
-            <View style={styles.stage}>
-              <View
-                style={[
-                  styles.scaledCanvasViewport,
-                  {
-                    width: DESIGN_SCREEN_WIDTH * pageScale,
-                    height: DESIGN_SCREEN_HEIGHT * pageScale,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.canvas,
-                    {
-                      transform: [{ scale: pageScale }],
-                    },
-                  ]}
+            <ScrollView
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.screenScroll}
+              contentContainerStyle={[
+                styles.scrollContent,
+                {
+                  paddingTop: insets.top + 34,
+                  paddingBottom: insets.bottom + 126,
+                  paddingHorizontal: 15,
+                },
+              ]}
+            >
+              <View style={[styles.contentColumn, { width: contentWidth }]}>
+                <Text style={styles.pageTitle}>新建档案</Text>
+                <Text style={styles.pageSubtitle}>基础信息越完整，后续能力画像和岗位推荐会越准确。</Text>
+
+                <Pressable
+                  hitSlop={8}
+                  onPress={handleResumeImport}
+                  style={({ pressed }) => [styles.resumeHint, pressed && styles.resumeHintPressed]}
                 >
-                  <View style={styles.foregroundLayer}>
-                    <Text style={styles.pageTitle}>新建档案</Text>
+                  <MaterialIcons color="rgba(95, 167, 239, 1)" name="check-circle" size={14} />
+                  <Text style={styles.resumeHintText}>导入简历一键填写</Text>
+                  <MaterialIcons color="rgba(95, 167, 239, 1)" name="file-upload" size={15} />
+                </Pressable>
+                {importedResumeName ? (
+                  <Text numberOfLines={1} style={styles.resumeImportedText}>
+                    {`已导入：${importedResumeName}`}
+                  </Text>
+                ) : null}
 
-                    <View style={styles.contentColumn}>
-                      <View style={styles.resumeHint}>
-                        <MaterialIcons color="rgba(95, 167, 239, 1)" name="check-circle" size={14} />
-                        <Text style={styles.resumeHintText}>导入简历一键填写</Text>
-                      </View>
+                <SectionCard headerText="基础信息" isOverlayActive={isSchoolSuggestionVisible}>
+                  {BASE_FIELDS.map((field, index) => (
+                    field.key === 'school' ? (
+                      <SchoolInputRow
+                        key={field.key}
+                        isLast={index === BASE_FIELDS.length - 1}
+                        label={field.label}
+                        minHeight={48}
+                        onChangeText={handleSchoolChange}
+                        onFocus={handleSchoolFocus}
+                        onSelect={handleSchoolSelect}
+                        placeholder={field.placeholder}
+                        suggestions={filteredSchoolSuggestions}
+                        value={formValues[field.key]}
+                        visible={isSchoolSuggestionVisible}
+                      />
+                    ) : (
+                      <InputRow
+                        key={field.key}
+                        isLast={index === BASE_FIELDS.length - 1}
+                        label={field.label}
+                        minHeight={48}
+                        onChangeText={(value) => updateField(field.key, value)}
+                        onFocus={closeSchoolDropdown}
+                        placeholder={field.placeholder}
+                        value={formValues[field.key]}
+                      />
+                    )
+                  ))}
+                </SectionCard>
 
-                      <SectionCard headerText="基础信息" isOverlayActive={isSchoolSuggestionVisible}>
-                        {BASE_FIELDS.map((field, index) => (
-                          field.key === 'school' ? (
-                            <SchoolInputRow
-                              key={field.key}
-                              isLast={index === BASE_FIELDS.length - 1}
-                              label={field.label}
-                              minHeight={46}
-                              onChangeText={handleSchoolChange}
-                              onFocus={handleSchoolFocus}
-                              onSelect={handleSchoolSelect}
-                              placeholder={field.placeholder}
-                              suggestions={filteredSchoolSuggestions}
-                              value={formValues[field.key]}
-                              visible={isSchoolSuggestionVisible}
-                            />
-                          ) : (
-                            <InputRow
-                              key={field.key}
-                              isLast={index === BASE_FIELDS.length - 1}
-                              label={field.label}
-                              minHeight={46}
-                              onChangeText={(value) => updateField(field.key, value)}
-                              onFocus={closeSchoolDropdown}
-                              placeholder={field.placeholder}
-                              value={formValues[field.key]}
-                            />
-                          )
-                        ))}
-                      </SectionCard>
+                <View style={styles.sectionGap} />
 
-                      <View style={styles.sectionGap} />
-
-                      <SectionCard headerText="个人档案（可选填）">
-                        {PROFILE_FIELDS.map((field, index) => (
-                          <InputRow
-                            key={field.label}
-                            isLast={index === PROFILE_FIELDS.length - 1}
-                            label={field.label}
-                            minHeight={43}
-                            onChangeText={(value) => updateField(field.key, value)}
-                            onFocus={closeSchoolDropdown}
-                            placeholder={field.placeholder}
-                            value={formValues[field.key]}
-                          />
-                        ))}
-                      </SectionCard>
-                    </View>
-
-                    <BottomArrowNavigation
-                      bottom={STANDARD_ARROW_BOTTOM}
-                      leftDisabled={!onBack}
-                      onLeftPress={onBack}
-                      onRightPress={onNavigate}
-                      rightDisabled={!onNavigate}
-                      scaleX={1}
+                <SectionCard headerText="个人档案（可选填）">
+                  {PROFILE_FIELDS.map((field, index) => (
+                    <InputRow
+                      key={field.label}
+                      isLast={index === PROFILE_FIELDS.length - 1}
+                      label={field.label}
+                      minHeight={field.minHeight}
+                      multiline
+                      onChangeText={(value) => updateField(field.key, value)}
+                      onFocus={closeSchoolDropdown}
+                      placeholder={field.placeholder}
+                      value={formValues[field.key]}
                     />
-                  </View>
-                </View>
+                  ))}
+                </SectionCard>
               </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          <BottomArrowNavigation
+            bottom={Math.max(insets.bottom + 10, 16)}
+            leftDisabled={!onBack}
+            onLeftPress={onBack}
+            onRightPress={onNavigate}
+            rightDisabled={!onNavigate}
+            scaleX={scaleX}
+          />
+        </View>
       </TouchableWithoutFeedback>
     </IdentityScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   keyboardAvoidingView: {
     flex: 1,
   },
@@ -497,59 +551,54 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  stage: {
-    minWidth: '100%',
-    minHeight: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  scaledCanvasViewport: {
-    position: 'relative',
-    overflow: 'visible',
-  },
-  canvas: {
-    width: DESIGN_SCREEN_WIDTH,
-    height: DESIGN_SCREEN_HEIGHT,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    transformOrigin: 'top left',
-  },
-  foregroundLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 2,
+  contentColumn: {
+    width: '100%',
   },
   pageTitle: {
-    position: 'absolute',
-    top: 96,
-    left: 0,
-    right: 0,
     fontSize: 36,
-    lineHeight: 52.13,
+    lineHeight: 52,
     fontWeight: '700',
     letterSpacing: 0,
     color: 'rgba(0, 0, 0, 1)',
-    textAlign: 'center',
   },
-  contentColumn: {
-    position: 'absolute',
-    top: 164,
-    left: 15,
-    width: 346,
+  pageSubtitle: {
+    marginTop: 4,
+    marginBottom: 14,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '400',
+    letterSpacing: 0,
+    color: 'rgba(84, 102, 105, 1)',
   },
   resumeHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    paddingRight: 6,
+  },
+  resumeHintPressed: {
+    opacity: 0.72,
   },
   resumeHintText: {
     marginLeft: 4,
+    marginRight: 4,
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '500',
     letterSpacing: 0,
     color: 'rgba(95, 167, 239, 1)',
+  },
+  resumeImportedText: {
+    marginTop: -2,
+    marginBottom: 12,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
+    letterSpacing: 0,
+    color: 'rgba(106, 106, 106, 1)',
   },
   sectionWrap: {
     width: '100%',
@@ -563,8 +612,8 @@ const styles = StyleSheet.create({
     width: 244,
     height: 31,
     paddingLeft: 10,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
     backgroundColor: 'rgba(10, 191, 186, 1)',
     justifyContent: 'center',
   },
@@ -576,13 +625,21 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 1)',
   },
   sectionCard: {
-    borderRadius: 8,
+    borderRadius: 10,
     paddingTop: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.98)',
     overflow: 'visible',
+    shadowColor: 'rgba(0, 0, 0, 0.07)',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 1,
+    shadowRadius: 14,
+    elevation: 4,
   },
   sectionGap: {
-    height: 24,
+    height: 22,
   },
   infoRow: {
     flexDirection: 'row',
@@ -593,16 +650,26 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(238, 238, 238, 1)',
   },
+  infoRowMultiline: {
+    alignItems: 'flex-start',
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
   infoLabel: {
+    width: 62,
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '600',
     letterSpacing: 0,
     color: 'rgba(106, 106, 106, 1)',
   },
+  infoLabelMultiline: {
+    paddingTop: 4,
+  },
   fieldInput: {
-    width: 190,
-    height: '100%',
+    flex: 1,
+    minWidth: 0,
+    minHeight: 24,
     paddingTop: 0,
     paddingBottom: 0,
     fontSize: 14,
@@ -613,6 +680,14 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     textAlignVertical: 'center',
   },
+  fieldInputMultiline: {
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'left',
+    textAlignVertical: 'top',
+    paddingTop: 2,
+    paddingBottom: 2,
+  },
   schoolRowWrap: {
     position: 'relative',
     zIndex: 1,
@@ -621,15 +696,17 @@ const styles = StyleSheet.create({
     zIndex: 40,
   },
   schoolFieldWrap: {
-    width: 204,
-    height: '100%',
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
   },
   schoolFieldInput: {
-    width: 176,
-    height: '100%',
+    flex: 1,
+    minWidth: 0,
+    minHeight: 24,
     paddingTop: 0,
     paddingBottom: 0,
     fontSize: 14,

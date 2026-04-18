@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Image,
   Keyboard,
@@ -16,13 +17,23 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { fetchAgentOpeningMessage, hasChatAgentAuthorization, sendAgentChatMessage } from '../../services/agent-service';
+
 type ChatRole = 'assistant' | 'user';
+type ChatMessageState = 'default' | 'thinking';
 
 type ChatMessage = {
   createdAt: Date;
   id: string;
   role: ChatRole;
+  state?: ChatMessageState;
   text: string;
+};
+
+type AssessmentScriptStep = {
+  assistantReply: string;
+  prompt: string;
+  thinkingText: string;
 };
 
 const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const;
@@ -31,7 +42,56 @@ const TAB_BAR_GAP = 5;
 const COMPOSER_CONTROL_HEIGHT = 46;
 const COMPOSER_WRAP_HEIGHT = 66;
 const AUTO_REPLY_DELAY_MS = 360;
+const ASSESSMENT_THINKING_DELAY_MS = 2000;
+const ASSESSMENT_STREAM_INTERVAL_MS = 34;
+const ASSESSMENT_STREAM_CHUNK_SIZE = 2;
+const REMOTE_THINKING_TEXT = 'AI Agent 正在分析你的输入...';
 const USER_BASELINE_SUMMARY = '你目前处在职业探索阶段，学习吸收和沟通协同能力相对更突出，也需要继续补足实践证明和岗位聚焦。';
+const ASSESSMENT_SCRIPT_STEPS: AssessmentScriptStep[] = [
+  {
+    prompt: '请告诉我你的大致求职方向',
+    thinkingText: '正在识别你的软件求职主方向...',
+    assistantReply:
+      '收到，你的求职方向会先按软件研发来测，重点看 C++ / 后端这条线的岗位匹配度。接下来，请把你最想优先投递的岗位按顺序说一下。',
+  },
+  {
+    prompt: '在这个方向里，你最想优先投哪一类岗位？如果你有 1、2、3 顺位，可以直接排出来。',
+    thinkingText: '正在判断你的岗位优先级是否足够清晰...',
+    assistantReply:
+      '岗位优先级已经比较清楚，当前主线可以先围绕 C++ 开发来建立证明。下一步我要判断你有没有一段真正能支撑研发岗位的项目经历。请说一段你最能展开的项目或实践。',
+  },
+  {
+    prompt: '你现有经历里，哪一段最能支撑这个岗位？请挑一个最能展开讲的项目、课程设计、竞赛或实践经历。',
+    thinkingText: '正在评估这段经历和研发岗位的相关度...',
+    assistantReply:
+      '这段经历对软件方向是相关的，但我还需要确认你是否真正做过核心实现，而不是只参与外围工作。接下来，请把你独立负责的部分讲清楚。',
+  },
+  {
+    prompt: '在这段经历里，哪些部分是你独立负责的？请尽量讲清楚你具体做了什么、解决了什么问题。',
+    thinkingText: '正在确认你的个人贡献与工程参与深度...',
+    assistantReply:
+      '明白了，这样的经历已经可以作为第一段岗位证明，但还要看它是否足够支撑正式投递。现在请告诉我，和目标岗位相比，你最缺的是什么？',
+  },
+  {
+    prompt: '和目标岗位的要求相比，你现在最欠缺的是什么？更偏向项目深度、实习经历、工程化能力，还是面试表达？',
+    thinkingText: '正在定位你当前最关键的求职短板...',
+    assistantReply:
+      '这个判断比较准确。你当前的短板不在基础课程，而在高质量项目证明和岗位化表达。最后一个问题，如果接下来只能优先补一件事，你会补什么？',
+  },
+  {
+    prompt: '如果接下来只能优先补一件事，你会补什么？为什么它最能提升你的求职结果？',
+    thinkingText: '正在汇总测评结果并生成岗位建议...',
+    assistantReply:
+      '好的，我先给你一个阶段性测评结论。\n\n1. 你的求职方向可以收敛到软件研发，主投 C++ 开发，后端开发和嵌入式开发作为备选。\n2. 你已经有一定课程项目和基础能力，但还缺少更像真实研发场景的项目证明。\n3. 现阶段最关键的补强项，是把 Linux、C++、Git、调试定位这一条工程化链路完整展示出来。\n4. 下一步最优动作，是做一个可运行、可讲解、可写进简历的 C++ 项目，再同步准备项目表达和模拟面试。\n\n这轮测评先到这里，你可以返回查看能力画像页。',
+  },
+];
+
+type AiAssistantPageProps = {
+  mode?: 'standalone' | 'tab';
+  onBack?: () => void;
+};
+
+type RichTextTone = 'assistant' | 'thinking' | 'user';
 
 function padTimeUnit(value: number) {
   return value.toString().padStart(2, '0');
@@ -129,6 +189,17 @@ function createInitialMessages(now = new Date()): ChatMessage[] {
   ];
 }
 
+function createAssessmentOpeningMessage(now = new Date()): ChatMessage[] {
+  return [
+    {
+      id: 'assistant-ready',
+      role: 'assistant',
+      text: ASSESSMENT_SCRIPT_STEPS[0].prompt,
+      createdAt: now,
+    },
+  ];
+}
+
 function buildAssistantReply(prompt: string) {
   const normalizedPrompt = prompt.trim();
   const intro = `结合你当前的基础情况来看，${USER_BASELINE_SUMMARY}`;
@@ -152,21 +223,133 @@ function buildAssistantReply(prompt: string) {
   return `${intro}\n\n你这条问题我建议先从“目标、差距、动作”三个层次来拆。目标是你想靠近什么岗位，差距是当前最缺哪一项证明，动作是这一周最小但能落地的一步。\n\n如果你愿意，再告诉我你最纠结的是岗位、简历、实习还是学习安排，我可以继续给你更具体的建议。`;
 }
 
-export default function AiAssistantPage() {
+function renderInlineRichText(text: string, keyPrefix: string) {
+  return text
+    .split(/(\*\*.*?\*\*|__.*?__)/g)
+    .filter((segment) => segment.length > 0)
+    .map((segment, index) => {
+      const isBoldMarkdown =
+        (segment.startsWith('**') && segment.endsWith('**')) ||
+        (segment.startsWith('__') && segment.endsWith('__'));
+
+      if (!isBoldMarkdown) {
+        return segment;
+      }
+
+      return (
+        <Text key={`${keyPrefix}-${index}`} style={styles.richTextStrong}>
+          {segment.slice(2, -2)}
+        </Text>
+      );
+    });
+}
+
+function RichTextMessage({
+  text,
+  tone,
+}: {
+  text: string;
+  tone: RichTextTone;
+}) {
+  const baseTextStyle = [
+    styles.bubbleText,
+    tone === 'user' ? styles.userBubbleText : styles.assistantBubbleText,
+    tone === 'thinking' && styles.thinkingBubbleText,
+  ];
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+
+  return (
+    <View style={styles.richTextWrap}>
+      {lines.map((rawLine, index) => {
+        const line = rawLine.replace(/\t/g, '    ');
+        const trimmedLine = line.trim();
+
+        if (!trimmedLine) {
+          return <View key={`spacer-${index}`} style={styles.richTextSpacer} />;
+        }
+
+        const headingMatch = trimmedLine.match(/^#{1,3}\s+(.*)$/);
+        const orderedMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
+        const bulletMatch = line.match(/^\s*[*-]\s+(.*)$/);
+
+        if (headingMatch) {
+          return (
+            <Text key={`heading-${index}`} style={[baseTextStyle, styles.richTextHeading]}>
+              {renderInlineRichText(headingMatch[1], `heading-${index}`)}
+            </Text>
+          );
+        }
+
+        if (orderedMatch) {
+          return (
+            <View key={`ordered-${index}`} style={styles.richListRow}>
+              <Text style={[baseTextStyle, styles.richListMarker]}>{`${orderedMatch[1]}.`}</Text>
+              <Text style={[baseTextStyle, styles.richListText]}>
+                {renderInlineRichText(orderedMatch[2], `ordered-${index}`)}
+              </Text>
+            </View>
+          );
+        }
+
+        if (bulletMatch) {
+          return (
+            <View key={`bullet-${index}`} style={styles.richListRow}>
+              <Text style={[baseTextStyle, styles.richListMarker]}>•</Text>
+              <Text style={[baseTextStyle, styles.richListText]}>
+                {renderInlineRichText(bulletMatch[1], `bullet-${index}`)}
+              </Text>
+            </View>
+          );
+        }
+
+        return (
+          <Text key={`paragraph-${index}`} style={baseTextStyle}>
+            {renderInlineRichText(line, `paragraph-${index}`)}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
+export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPageProps) {
+  const standaloneMode = mode === 'standalone';
+  const agentEnabled = hasChatAgentAuthorization();
   const [draft, setDraft] = useState('');
+  const [assessmentStep, setAssessmentStep] = useState(0);
+  const [conversationId, setConversationId] = useState('');
+  const [conversationEnded, setConversationEnded] = useState(false);
+  const [isAssistantResponding, setIsAssistantResponding] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(() => createInitialMessages());
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    standaloneMode ? createAssessmentOpeningMessage() : createInitialMessages()
+  );
+  const [previousAgentOutput, setPreviousAgentOutput] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const nextMessageIdRef = useRef(4);
+  const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nextMessageIdRef = useRef(standaloneMode ? 2 : 4);
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const contentWidth = Math.min(screenWidth - 28, 420);
+  const horizontalInset = (screenWidth - contentWidth) / 2;
   const tabBarBottomPadding = Math.max(insets.bottom - 16, 2);
-  const composerBottomSpacing = keyboardVisible ? TAB_BAR_GAP : MAIN_TAB_BAR_HEIGHT + tabBarBottomPadding + TAB_BAR_GAP;
-  const scrollBottomPadding = COMPOSER_WRAP_HEIGHT + composerBottomSpacing + 18;
-
+  const headerHeight = standaloneMode ? insets.top + 58 : 0;
+  const currentAssessmentStep = standaloneMode ? ASSESSMENT_SCRIPT_STEPS[assessmentStep] : undefined;
+  const standaloneInputLocked = standaloneMode && !agentEnabled && !currentAssessmentStep;
+  const composerBottomSpacing = keyboardVisible
+    ? standaloneMode
+      ? keyboardHeight + 8
+      : TAB_BAR_GAP
+    : standaloneMode
+      ? Math.max(insets.bottom + 10, 16)
+      : MAIN_TAB_BAR_HEIGHT + tabBarBottomPadding + TAB_BAR_GAP;
+  const scrollBottomPadding = standaloneMode
+    ? COMPOSER_WRAP_HEIGHT + Math.max(insets.bottom + 10, 18) + 12
+    : COMPOSER_WRAP_HEIGHT + composerBottomSpacing + 18;
   useEffect(() => {
     const timer = setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -178,14 +361,16 @@ export default function AiAssistantPage() {
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSubscription = Keyboard.addListener(showEvent, () => {
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
       setKeyboardVisible(true);
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, Platform.OS === 'ios' ? 60 : 30);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
+      setKeyboardHeight(0);
     });
 
     return () => {
@@ -193,40 +378,143 @@ export default function AiAssistantPage() {
         clearTimeout(replyTimerRef.current);
       }
 
+      if (thinkingTimerRef.current) {
+        clearTimeout(thinkingTimerRef.current);
+      }
+
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+      }
+
       showSubscription.remove();
       hideSubscription.remove();
     };
   }, []);
 
-  const appendAssistantMessage = (text: string) => {
+  useEffect(() => {
+    if (!agentEnabled) {
+      return;
+    }
+
+    let active = true;
+
+    fetchAgentOpeningMessage()
+      .then((openingMessage) => {
+        if (!active || !openingMessage) {
+          return;
+        }
+
+        setMessages([
+          {
+            id: 'assistant-opening',
+            role: 'assistant',
+            text: openingMessage,
+            createdAt: new Date(),
+          },
+        ]);
+      })
+      .catch(() => {
+        // Fall back to the local opening when the remote agent is unavailable.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [agentEnabled]);
+
+  const appendAssistantMessage = (text: string, state: ChatMessageState = 'default') => {
+    const id = `message-${nextMessageIdRef.current++}`;
+
     setMessages((current) => [
       ...current,
       {
-        id: `message-${nextMessageIdRef.current++}`,
+        id,
         role: 'assistant',
+        state,
         text,
         createdAt: new Date(),
       },
     ]);
+
+    return id;
   };
 
+  const updateMessageText = (messageId: string, text: string) => {
+    setMessages((current) =>
+      current.map((message) => (message.id === messageId ? { ...message, text } : message))
+    );
+  };
+
+  const removeMessage = (messageId: string) => {
+    setMessages((current) => current.filter((message) => message.id !== messageId));
+  };
+
+  const clearResponseTimers = () => {
+    if (replyTimerRef.current) {
+      clearTimeout(replyTimerRef.current);
+      replyTimerRef.current = null;
+    }
+
+    if (thinkingTimerRef.current) {
+      clearTimeout(thinkingTimerRef.current);
+      thinkingTimerRef.current = null;
+    }
+
+    if (streamTimerRef.current) {
+      clearInterval(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+  };
+
+  const streamAssistantReply = (text: string, onComplete?: () => void) => {
+    const messageId = appendAssistantMessage('');
+    let cursor = 0;
+
+    streamTimerRef.current = setInterval(() => {
+      cursor = Math.min(cursor + ASSESSMENT_STREAM_CHUNK_SIZE, text.length);
+      updateMessageText(messageId, text.slice(0, cursor));
+
+      if (cursor >= text.length) {
+        if (streamTimerRef.current) {
+          clearInterval(streamTimerRef.current);
+          streamTimerRef.current = null;
+        }
+
+        onComplete?.();
+      }
+    }, ASSESSMENT_STREAM_INTERVAL_MS);
+  };
+
+  const waitDuration = (durationMs: number) =>
+    new Promise<void>((resolve) => {
+      if (durationMs <= 0) {
+        resolve();
+        return;
+      }
+
+      setTimeout(resolve, durationMs);
+    });
+
   const handleVoicePress = () => {
+    if (standaloneMode) {
+      inputRef.current?.focus();
+      return;
+    }
+
     setDraft((current) =>
       current.trim().length > 0 ? current : '结合我当前的能力画像，帮我安排下一周的行动计划'
     );
     inputRef.current?.focus();
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmedDraft = draft.trim();
 
-    if (!trimmedDraft) {
+    if (!trimmedDraft || isAssistantResponding || standaloneInputLocked) {
       return;
     }
 
-    if (replyTimerRef.current) {
-      clearTimeout(replyTimerRef.current);
-    }
+    clearResponseTimers();
 
     const userMessage: ChatMessage = {
       id: `message-${nextMessageIdRef.current++}`,
@@ -238,13 +526,78 @@ export default function AiAssistantPage() {
     setMessages((current) => [...current, userMessage]);
     setDraft('');
 
+    if (agentEnabled) {
+      const nextConversationId = conversationEnded ? '' : conversationId;
+      const nextPreviousAgentOutput = conversationEnded ? '' : previousAgentOutput;
+
+      if (conversationEnded) {
+        setConversationEnded(false);
+        setConversationId('');
+        setPreviousAgentOutput('');
+      }
+
+      setIsAssistantResponding(true);
+
+      const thinkingMessageId = appendAssistantMessage(REMOTE_THINKING_TEXT, 'thinking');
+      const requestStartedAt = Date.now();
+
+      try {
+        const result = await sendAgentChatMessage({
+          conversationId: nextConversationId || undefined,
+          previousAgentOutput: nextPreviousAgentOutput,
+          query: trimmedDraft,
+        });
+
+        setConversationId(result.conversationId);
+        setPreviousAgentOutput(result.rawAnswer || result.answer);
+
+        await waitDuration(ASSESSMENT_THINKING_DELAY_MS - (Date.now() - requestStartedAt));
+        removeMessage(thinkingMessageId);
+
+        streamAssistantReply(result.answer, () => {
+          setConversationEnded(result.ended);
+          setIsAssistantResponding(false);
+        });
+
+        return;
+      } catch {
+        removeMessage(thinkingMessageId);
+      }
+    }
+
+    setIsAssistantResponding(false);
+
+    if (standaloneMode) {
+      if (!currentAssessmentStep) {
+        return;
+      }
+
+      setIsAssistantResponding(true);
+
+      const thinkingMessageId = appendAssistantMessage(currentAssessmentStep.thinkingText, 'thinking');
+
+      thinkingTimerRef.current = setTimeout(() => {
+        removeMessage(thinkingMessageId);
+
+        streamAssistantReply(currentAssessmentStep.assistantReply, () => {
+          setAssessmentStep((current) => current + 1);
+          setIsAssistantResponding(false);
+        });
+
+        thinkingTimerRef.current = null;
+      }, ASSESSMENT_THINKING_DELAY_MS);
+
+      return;
+    }
+
     replyTimerRef.current = setTimeout(() => {
       appendAssistantMessage(buildAssistantReply(trimmedDraft));
       replyTimerRef.current = null;
     }, AUTO_REPLY_DELAY_MS);
   };
+  const sendDisabled = draft.trim().length === 0 || isAssistantResponding || standaloneInputLocked;
 
-  return (
+  const assistantContent = (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
@@ -255,11 +608,31 @@ export default function AiAssistantPage() {
       <View pointerEvents="none" style={[styles.backgroundGlow, styles.backgroundGlowPrimary]} />
       <View pointerEvents="none" style={[styles.backgroundGlow, styles.backgroundGlowSecondary]} />
 
+      {standaloneMode ? (
+        <View
+          style={[
+            styles.header,
+            {
+              left: horizontalInset,
+              paddingTop: insets.top + 8,
+              paddingHorizontal: 4,
+              width: contentWidth,
+            },
+          ]}
+        >
+          <Pressable hitSlop={10} onPress={onBack} style={styles.headerBackButton}>
+            <Ionicons color="rgba(76, 88, 104, 1)" name="chevron-back" size={24} />
+          </Pressable>
+          <Text style={styles.headerTitle}>AI测评对话</Text>
+          <View style={styles.headerRightSpacer} />
+        </View>
+      ) : null}
+
       <View
         style={[
           styles.contentWrap,
           {
-            paddingTop: insets.top + 8,
+            paddingTop: standaloneMode ? headerHeight : insets.top + 8,
           },
         ]}
       >
@@ -277,6 +650,7 @@ export default function AiAssistantPage() {
         >
           {messages.map((message, index) => {
             const isAssistant = message.role === 'assistant';
+            const isThinking = message.state === 'thinking';
 
             return (
               <View key={message.id}>
@@ -297,10 +671,18 @@ export default function AiAssistantPage() {
                     </View>
                   ) : null}
 
-                  <View style={[styles.bubble, isAssistant ? styles.assistantBubble : styles.userBubble]}>
-                    <Text style={[styles.bubbleText, isAssistant ? styles.assistantBubbleText : styles.userBubbleText]}>
-                      {message.text}
-                    </Text>
+                  <View
+                    style={[
+                      styles.bubble,
+                      isAssistant ? styles.assistantBubble : styles.userBubble,
+                      isThinking && styles.thinkingBubble,
+                    ]}
+                  >
+                    {isAssistant ? (
+                      <RichTextMessage text={message.text} tone={isThinking ? 'thinking' : 'assistant'} />
+                    ) : (
+                      <Text style={[styles.bubbleText, styles.userBubbleText]}>{message.text}</Text>
+                    )}
                   </View>
 
                   {!isAssistant ? (
@@ -319,7 +701,8 @@ export default function AiAssistantPage() {
         style={[
           styles.composerWrap,
           {
-            marginBottom: composerBottomSpacing,
+            bottom: composerBottomSpacing,
+            left: horizontalInset,
             width: contentWidth,
           },
         ]}
@@ -331,8 +714,19 @@ export default function AiAssistantPage() {
         <View style={styles.inputShell}>
           <TextInput
             ref={inputRef}
+            editable={!standaloneInputLocked}
             onChangeText={setDraft}
-            placeholder="问目标岗位、实习或下一步"
+            placeholder={
+              standaloneMode
+                ? !standaloneInputLocked
+                  ? conversationEnded
+                    ? '本轮已结束，可输入新的问题'
+                    : '请输入你的回答'
+                  : '本轮测评已完成'
+                : conversationEnded
+                  ? '本轮已结束，可输入新的问题'
+                  : '问目标岗位、实习或下一步'
+            }
             placeholderTextColor="rgba(152, 162, 179, 1)"
             style={styles.input}
             value={draft}
@@ -340,13 +734,13 @@ export default function AiAssistantPage() {
         </View>
 
         <Pressable
-          disabled={draft.trim().length === 0}
+          disabled={sendDisabled}
           hitSlop={8}
           onPress={handleSend}
           style={({ pressed }) => [
             styles.sendButton,
-            draft.trim().length === 0 && styles.sendButtonDisabled,
-            pressed && draft.trim().length > 0 && styles.sendButtonPressed,
+            sendDisabled && styles.sendButtonDisabled,
+            pressed && !sendDisabled && styles.sendButtonPressed,
           ]}
         >
           <Text style={styles.sendButtonText}>发送</Text>
@@ -354,12 +748,54 @@ export default function AiAssistantPage() {
       </View>
     </KeyboardAvoidingView>
   );
+
+  if (standaloneMode) {
+    return (
+      <LinearGradient
+        colors={['rgba(168, 237, 229, 1)', 'rgba(252, 250, 250, 1)']}
+        end={{ x: 0.5, y: 1 }}
+        start={{ x: 0.5, y: 0 }}
+        style={styles.screen}
+      >
+        {assistantContent}
+      </LinearGradient>
+    );
+  }
+
+  return assistantContent;
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     position: 'relative',
+  },
+  header: {
+    position: 'absolute',
+    top: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 12,
+  },
+  headerBackButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.74)',
+  },
+  headerTitle: {
+    color: 'rgba(34, 42, 52, 1)',
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  headerRightSpacer: {
+    width: 40,
+    height: 40,
   },
   backgroundGlow: {
     position: 'absolute',
@@ -456,6 +892,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(230, 236, 240, 1)',
   },
+  thinkingBubble: {
+    backgroundColor: 'rgba(246, 249, 251, 0.98)',
+    borderColor: 'rgba(214, 224, 230, 1)',
+  },
   userBubble: {
     borderTopRightRadius: 8,
     backgroundColor: 'rgba(128, 213, 205, 0.95)',
@@ -465,19 +905,47 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     letterSpacing: 0,
   },
+  richTextWrap: {
+    gap: 6,
+  },
+  richTextSpacer: {
+    height: 2,
+  },
+  richTextHeading: {
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: '700',
+  },
+  richListRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  richListMarker: {
+    width: 18,
+    paddingTop: 0,
+    fontWeight: '700',
+  },
+  richListText: {
+    flex: 1,
+  },
+  richTextStrong: {
+    fontWeight: '800',
+  },
   assistantBubbleText: {
     color: 'rgba(28, 36, 45, 1)',
     fontWeight: '500',
+  },
+  thinkingBubbleText: {
+    color: 'rgba(95, 106, 118, 1)',
   },
   userBubbleText: {
     color: 'rgba(10, 37, 34, 1)',
     fontWeight: '600',
   },
   composerWrap: {
-    alignSelf: 'center',
+    position: 'absolute',
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 24,

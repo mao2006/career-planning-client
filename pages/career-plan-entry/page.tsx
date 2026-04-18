@@ -1,4 +1,6 @@
-import { Image, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useState } from 'react';
+import * as DocumentPicker from 'expo-document-picker';
+import { Alert, Image, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, {
   Defs,
   LinearGradient as SvgLinearGradient,
@@ -17,6 +19,12 @@ const TITLE_LINES = ['想要个性化', '职业规划?'] as const;
 const SUBTITLE_LINES = ['想要精准把握未来方向?', '点击生成个性化职业规划！'] as const;
 const TITLE_GRADIENT = ['rgba(48, 79, 64, 1)', 'rgba(112, 193, 154, 0.92)'] as const;
 const SUBTITLE_GRADIENT = ['rgba(83, 173, 131, 1)', 'rgba(163, 229, 195, 1)'] as const;
+const TRAINING_PLAN_FILE_TYPES = [
+  'image/*',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
 
 type CareerPlanEntryPageProps = {
   onNavigate?: () => void;
@@ -80,8 +88,29 @@ function GradientTextBlock({
 }
 
 export default function CareerPlanEntryPage({ onNavigate }: CareerPlanEntryPageProps) {
+  const [importedPlanName, setImportedPlanName] = useState('');
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const pageScale = Math.min(screenWidth / DESIGN_SCREEN_WIDTH, screenHeight / DESIGN_SCREEN_HEIGHT);
+
+  const handleImportPlan = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: TRAINING_PLAN_FILE_TYPES,
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      setImportedPlanName(asset.name || '已导入培养计划');
+      Alert.alert('培养计划已导入', '已识别到你的专业培养计划，下一步可以继续生成更详细的职业规划。');
+    } catch (error) {
+      Alert.alert('导入失败', '暂时无法读取专业培养计划文件，请稍后重试。');
+    }
+  };
 
   return (
     <IdentityScreenBackground>
@@ -153,11 +182,18 @@ export default function CareerPlanEntryPage({ onNavigate }: CareerPlanEntryPageP
             <View style={styles.bottomCopyWrap}>
               <Text style={styles.bottomCopyTitle}>导入专业培养计划，</Text>
               <Text style={styles.bottomCopyBody}>可以生成更详细的职业规划哦～</Text>
+              {importedPlanName ? <Text style={styles.importedPlanText}>{`已导入：${importedPlanName}`}</Text> : null}
             </View>
 
-            <View style={styles.importButton}>
-              <Text style={styles.importButtonText}>点击导入专业培养计划</Text>
-            </View>
+            <Pressable
+              hitSlop={8}
+              onPress={handleImportPlan}
+              style={({ pressed }) => [styles.importButton, pressed && styles.importButtonPressed]}
+            >
+              <Text style={styles.importButtonText}>
+                {importedPlanName ? '重新导入专业培养计划' : '点击导入专业培养计划'}
+              </Text>
+            </Pressable>
 
             <BottomArrowNavigation
               bottom={20}
@@ -278,6 +314,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     color: 'rgba(120, 127, 129, 1)',
   },
+  importedPlanText: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
+    letterSpacing: 0,
+    color: 'rgba(95, 113, 116, 1)',
+  },
   importButton: {
     position: 'absolute',
     left: 35,
@@ -289,6 +333,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(103, 103, 103, 0.96)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  importButtonPressed: {
+    opacity: 0.78,
   },
   importButtonText: {
     fontSize: 14,

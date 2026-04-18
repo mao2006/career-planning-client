@@ -13,17 +13,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import BottomArrowNavigation, { STANDARD_ARROW_BOTTOM } from '../../components/bottom-arrow-navigation';
+import BottomArrowNavigation from '../../components/bottom-arrow-navigation';
 import IdentityScreenBackground from '../../components/identity-screen-background';
 
-const DESIGN_SCREEN_WIDTH = 375;
-const DESIGN_SCREEN_HEIGHT = 812;
-const JIXIANGWU_LEFT = 108;
-const JIXIANGWU_TOP = 21;
-const JIXIANGWU_WIDTH = 428;
-const JIXIANGWU_HEIGHT = 644;
-
+const PAGE_MAX_WIDTH = 430;
 const TRANSFER_OPTIONS = ['有', '没有', '不确定'] as const;
 const MORE_FIELDS = [
   {
@@ -74,7 +69,6 @@ type SelectorRowProps = {
   isLast?: boolean;
   isOpen: boolean;
   label: string;
-  openUpward?: boolean;
   onPress: () => void;
   onSelect: (value: string) => void;
   options: readonly string[];
@@ -86,7 +80,6 @@ function SelectorRow({
   isLast = false,
   isOpen,
   label,
-  openUpward = false,
   onPress,
   onSelect,
   options,
@@ -103,7 +96,7 @@ function SelectorRow({
         style={[
           styles.infoRow,
           {
-            borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
+            borderBottomWidth: isLast && !isOpen ? 0 : StyleSheet.hairlineWidth,
           },
         ]}
       >
@@ -123,12 +116,7 @@ function SelectorRow({
       </Pressable>
 
       {isOpen ? (
-        <View
-          style={[
-            styles.selectorDropdown,
-            openUpward ? styles.selectorDropdownUpward : styles.selectorDropdownDownward,
-          ]}
-        >
+        <View style={[styles.selectorDropdown, isLast && styles.selectorDropdownLast]}>
           {options.map((option, index) => {
             const selected = value === option;
 
@@ -136,10 +124,7 @@ function SelectorRow({
               <Pressable
                 key={option}
                 onPress={() => onSelect(option)}
-                style={[
-                  styles.selectorOption,
-                  index < options.length - 1 && styles.selectorOptionBorder,
-                ]}
+                style={[styles.selectorOption, index < options.length - 1 && styles.selectorOptionBorder]}
               >
                 <View style={[styles.selectorRadioOuter, selected && styles.selectorRadioOuterSelected]}>
                   {selected ? <View style={styles.selectorRadioInner} /> : null}
@@ -162,8 +147,10 @@ export default function IdentityMorePage({ onBack, onNavigate }: IdentityMorePag
     transferIntent: null,
   });
   const [activeSelectorKey, setActiveSelectorKey] = useState<SelectorFieldKey | null>(null);
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const pageScale = Math.min(screenWidth / DESIGN_SCREEN_WIDTH, screenHeight / DESIGN_SCREEN_HEIGHT);
+  const { width: screenWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const scaleX = screenWidth / 375;
+  const contentWidth = Math.min(screenWidth - 30, PAGE_MAX_WIDTH);
 
   const updateField = (field: keyof FormValues, value: string | FormValues['transferIntent']) => {
     setFormValues((current) => ({ ...current, [field]: value }));
@@ -187,111 +174,105 @@ export default function IdentityMorePage({ onBack, onNavigate }: IdentityMorePag
           Keyboard.dismiss();
         }}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-          style={styles.keyboardAvoidingView}
-        >
-          <ScrollView
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            style={styles.screenScroll}
-            contentContainerStyle={styles.scrollContent}
+        <View style={styles.screen}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+            style={styles.keyboardAvoidingView}
           >
-            <View style={styles.stage}>
-              <View
-                style={[
-                  styles.scaledCanvasViewport,
-                  {
-                    width: DESIGN_SCREEN_WIDTH * pageScale,
-                    height: DESIGN_SCREEN_HEIGHT * pageScale,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.canvas,
-                    {
-                      transform: [{ scale: pageScale }],
-                    },
-                  ]}
-                >
+            <ScrollView
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              style={styles.screenScroll}
+              contentContainerStyle={[
+                styles.scrollContent,
+                {
+                  paddingTop: insets.top + 30,
+                  paddingBottom: insets.bottom + 126,
+                  paddingHorizontal: 15,
+                },
+              ]}
+            >
+              <View style={[styles.contentColumn, { width: contentWidth }]}>
+                <View style={styles.heroCard}>
+                  <View style={styles.heroCopy}>
+                    <Text style={styles.pageTitle}>新建档案</Text>
+                    <Text style={styles.pageSubtitle}>补充更多偏好和目标，后续推荐会更贴近你的真实选择。</Text>
+                  </View>
                   <Image
                     resizeMode="contain"
                     source={require('../../assets/jixiangwu.png')}
-                    style={styles.jixiangwuLayer}
+                    style={styles.heroMascot}
                   />
+                </View>
 
-                  <View style={styles.foregroundLayer}>
-                    <Text style={styles.pageTitle}>新建档案</Text>
+                <View style={styles.sectionWrap}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionHeaderText}>更多信息</Text>
+                  </View>
 
-                    <View style={styles.sectionWrap}>
-                      <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionHeaderText}>更多信息</Text>
-                      </View>
+                  <View style={styles.sectionCard}>
+                    <View style={styles.intentRow}>
+                      <Text style={styles.infoLabel}>转专业意愿</Text>
+                      <View style={styles.intentOptions}>
+                        {TRANSFER_OPTIONS.map((option) => {
+                          const selected = formValues.transferIntent === option;
 
-                      <View style={styles.sectionCard}>
-                        <View style={styles.intentRow}>
-                          <Text style={styles.infoLabel}>转专业意愿</Text>
-                          <View style={styles.intentOptions}>
-                            {TRANSFER_OPTIONS.map((option) => {
-                              const selected = formValues.transferIntent === option;
-
-                              return (
-                                <Pressable
-                                  key={option}
-                                  hitSlop={6}
-                                  onPress={() => updateField('transferIntent', option)}
-                                  style={styles.intentOption}
-                                >
-                                  <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
-                                    {selected ? <View style={styles.radioInner} /> : null}
-                                  </View>
-                                  <Text style={styles.intentOptionText}>{option}</Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
-                        </View>
-
-                        {MORE_FIELDS.map((field, index) => (
-                          <SelectorRow
-                            key={field.key}
-                            isLast={index === MORE_FIELDS.length - 1}
-                            isOpen={activeSelectorKey === field.key}
-                            label={field.label}
-                            openUpward={index >= MORE_FIELDS.length - 2}
-                            onPress={() => toggleSelector(field.key)}
-                            onSelect={(value) => handleSelect(field.key, value)}
-                            options={field.options}
-                            placeholder={field.placeholder}
-                            value={formValues[field.key]}
-                          />
-                        ))}
+                          return (
+                            <Pressable
+                              key={option}
+                              hitSlop={6}
+                              onPress={() => updateField('transferIntent', option)}
+                              style={styles.intentOption}
+                            >
+                              <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+                                {selected ? <View style={styles.radioInner} /> : null}
+                              </View>
+                              <Text style={styles.intentOptionText}>{option}</Text>
+                            </Pressable>
+                          );
+                        })}
                       </View>
                     </View>
 
-                    <BottomArrowNavigation
-                      bottom={STANDARD_ARROW_BOTTOM}
-                      leftDisabled={!onBack}
-                      onLeftPress={onBack}
-                      onRightPress={onNavigate}
-                      rightDisabled={!onNavigate}
-                      scaleX={1}
-                    />
+                    {MORE_FIELDS.map((field, index) => (
+                      <SelectorRow
+                        key={field.key}
+                        isLast={index === MORE_FIELDS.length - 1}
+                        isOpen={activeSelectorKey === field.key}
+                        label={field.label}
+                        onPress={() => toggleSelector(field.key)}
+                        onSelect={(value) => handleSelect(field.key, value)}
+                        options={field.options}
+                        placeholder={field.placeholder}
+                        value={formValues[field.key]}
+                      />
+                    ))}
                   </View>
                 </View>
               </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+            </ScrollView>
+          </KeyboardAvoidingView>
+
+          <BottomArrowNavigation
+            bottom={Math.max(insets.bottom + 10, 16)}
+            leftDisabled={!onBack}
+            onLeftPress={onBack}
+            onRightPress={onNavigate}
+            rightDisabled={!onNavigate}
+            scaleX={scaleX}
+          />
+        </View>
       </TouchableWithoutFeedback>
     </IdentityScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   keyboardAvoidingView: {
     flex: 1,
   },
@@ -300,63 +281,57 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  stage: {
-    minWidth: '100%',
-    minHeight: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  scaledCanvasViewport: {
-    position: 'relative',
-    overflow: 'visible',
+  contentColumn: {
+    width: '100%',
   },
-  canvas: {
-    width: DESIGN_SCREEN_WIDTH,
-    height: DESIGN_SCREEN_HEIGHT,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    transformOrigin: 'top left',
+  heroCard: {
+    marginBottom: 22,
+    borderRadius: 28,
+    paddingLeft: 22,
+    paddingRight: 14,
+    paddingVertical: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.58)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
-  jixiangwuLayer: {
-    position: 'absolute',
-    left: JIXIANGWU_LEFT,
-    top: JIXIANGWU_TOP,
-    width: JIXIANGWU_WIDTH,
-    height: JIXIANGWU_HEIGHT,
-    opacity: 1,
-    zIndex: 1,
-  },
-  foregroundLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 2,
+  heroCopy: {
+    flex: 1,
+    paddingRight: 8,
   },
   pageTitle: {
-    position: 'absolute',
-    left: 28,
-    top: 161,
-    width: 144,
-    height: 53,
     fontSize: 36,
-    lineHeight: 52.13,
+    lineHeight: 52,
     fontWeight: '700',
     letterSpacing: 0,
     color: 'rgba(0, 0, 0, 1)',
-    textAlign: 'left',
+  },
+  pageSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '400',
+    letterSpacing: 0,
+    color: 'rgba(84, 102, 105, 1)',
+  },
+  heroMascot: {
+    width: 120,
+    height: 108,
+    marginRight: -8,
   },
   sectionWrap: {
-    position: 'absolute',
-    top: 320,
-    left: 15,
-    width: 346,
+    width: '100%',
+    position: 'relative',
+    zIndex: 1,
   },
   sectionHeader: {
     width: 244,
     height: 31,
     paddingLeft: 10,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
     backgroundColor: 'rgba(10, 191, 186, 1)',
     justifyContent: 'center',
   },
@@ -368,29 +343,42 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 1)',
   },
   sectionCard: {
-    borderRadius: 8,
+    borderRadius: 10,
     paddingTop: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    overflow: 'visible',
+    shadowColor: 'rgba(0, 0, 0, 0.07)',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 1,
+    shadowRadius: 14,
+    elevation: 4,
   },
   intentRow: {
-    minHeight: 46,
+    minHeight: 56,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingLeft: 22,
     paddingRight: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(238, 238, 238, 1)',
   },
   intentOptions: {
+    flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    marginLeft: 10,
   },
   intentOption: {
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 12,
+    marginBottom: 8,
   },
   radioOuter: {
     width: 14,
@@ -428,6 +416,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(238, 238, 238, 1)',
   },
   infoLabel: {
+    width: 72,
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '600',
@@ -442,9 +431,10 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   selectorTrigger: {
-    width: 206,
+    flex: 1,
+    minWidth: 0,
     minHeight: 63,
-    paddingLeft: 10,
+    marginLeft: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -475,33 +465,21 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(130, 227, 221, 1)',
   },
   selectorDropdown: {
-    position: 'absolute',
-    right: 6,
-    width: 320,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 1)',
-    shadowColor: 'rgba(0, 0, 0, 0.18)',
-    shadowOpacity: 1,
-    shadowRadius: 10,
-    elevation: 10,
+    marginLeft: 94,
+    marginRight: 14,
+    marginBottom: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(248, 251, 251, 1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(225, 230, 232, 1)',
+    overflow: 'hidden',
   },
-  selectorDropdownDownward: {
-    top: 48,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-  },
-  selectorDropdownUpward: {
-    bottom: 48,
-    shadowOffset: {
-      width: 0,
-      height: -4,
-    },
+  selectorDropdownLast: {
+    marginBottom: 4,
   },
   selectorOption: {
     minHeight: 58,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -513,7 +491,7 @@ const styles = StyleSheet.create({
   selectorRadioOuter: {
     width: 18,
     height: 18,
-    marginTop: 3,
+    marginTop: 2,
     marginRight: 12,
     borderRadius: 9,
     borderWidth: 1.5,

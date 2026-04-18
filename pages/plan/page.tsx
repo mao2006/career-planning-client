@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -14,6 +14,9 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import JobGraphPage from './job-graph-page';
+import SkillGraphPage from './skill-graph-page';
 
 const PERIOD_OPTIONS = [
   '大二下',
@@ -40,7 +43,6 @@ const COURSE_FILE_TYPES = [
 
 type PeriodOption = (typeof PERIOD_OPTIONS)[number];
 type ExportFormat = (typeof EXPORT_OPTIONS)[number]['id'];
-type GraphType = 'job' | 'skill';
 type CompletionState = 'done' | 'todo';
 type TaskType = 'accumulate' | 'focused';
 
@@ -874,14 +876,18 @@ function DetailPageModal({
   );
 }
 
-export default function PlanPage() {
+type PlanPageProps = {
+  onDetailVisibilityChange?: (visible: boolean) => void;
+};
+
+export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
+  const [activeSubview, setActiveSubview] = useState<'jobGraph' | 'main' | 'skillGraph'>('main');
   const [selectedJobId, setSelectedJobId] = useState(JOB_PLANS[0].id);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodOption>(PERIOD_OPTIONS[0]);
   const [jobDropdownOpen, setJobDropdownOpen] = useState(false);
   const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
   const [pathExpanded, setPathExpanded] = useState(false);
   const [activeTask, setActiveTask] = useState<LearningTask | null>(null);
-  const [activeGraph, setActiveGraph] = useState<GraphType | null>(null);
   const [importedScheduleName, setImportedScheduleName] = useState('');
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
@@ -898,6 +904,16 @@ export default function PlanPage() {
   const contentLeft = (screenWidth - contentWidth) / 2;
   const floatingJobDropdownLeft = contentLeft + contentWidth - headerSelectorWidth;
   const floatingJobDropdownTop = insets.top + 18 + 48;
+
+  useEffect(() => {
+    onDetailVisibilityChange?.(activeSubview !== 'main');
+  }, [activeSubview, onDetailVisibilityChange]);
+
+  useEffect(() => {
+    return () => {
+      onDetailVisibilityChange?.(false);
+    };
+  }, [onDetailVisibilityChange]);
 
   const closeMenus = () => {
     setJobDropdownOpen(false);
@@ -953,8 +969,13 @@ export default function PlanPage() {
     );
   };
 
-  const graphModalTitle = activeGraph === 'job' ? '岗位图谱' : '技能图谱';
-  const graphModalSubtitle = activeGraph === 'job' ? currentJob.label : `${currentJob.headerLabel} 核心能力结构`;
+  if (activeSubview === 'jobGraph') {
+    return <JobGraphPage onBack={() => setActiveSubview('main')} planJob={currentJob} />;
+  }
+
+  if (activeSubview === 'skillGraph') {
+    return <SkillGraphPage onBack={() => setActiveSubview('main')} planJob={currentJob} />;
+  }
 
   return (
     <View style={styles.screen}>
@@ -1043,10 +1064,22 @@ export default function PlanPage() {
             </View>
 
             <View style={styles.summaryActionColumn}>
-              <Pressable onPress={() => setActiveGraph('job')} style={styles.graphButton}>
+              <Pressable
+                onPress={() => {
+                  closeMenus();
+                  setActiveSubview('jobGraph');
+                }}
+                style={styles.graphButton}
+              >
                 <Text style={styles.graphButtonText}>岗位图谱</Text>
               </Pressable>
-              <Pressable onPress={() => setActiveGraph('skill')} style={styles.graphButton}>
+              <Pressable
+                onPress={() => {
+                  closeMenus();
+                  setActiveSubview('skillGraph');
+                }}
+                style={styles.graphButton}
+              >
                 <Text style={styles.graphButtonText}>技能图谱</Text>
               </Pressable>
             </View>
@@ -1301,57 +1334,6 @@ export default function PlanPage() {
             ))}
           </View>
         ))}
-      </DetailPageModal>
-
-      <DetailPageModal
-        onClose={() => setActiveGraph(null)}
-        subtitle={graphModalSubtitle}
-        title={graphModalTitle}
-        visible={activeGraph !== null}
-      >
-        {activeGraph === 'job' ? (
-          <View>
-            <View style={styles.modalHeroCard}>
-              <Text style={styles.modalHeroTitle}>岗位演进路径</Text>
-              <Text style={styles.modalHeroBody}>
-                当前目标岗位会随着经验积累逐步向更高复杂度与更强影响力的角色演进。
-              </Text>
-            </View>
-
-            <View style={styles.graphTrailWrap}>
-              {currentJob.jobGraphTrail.map((item, index) => (
-                <View key={`${item}-${index}`} style={styles.graphTrailItem}>
-                  <Text style={styles.graphTrailText}>{item}</Text>
-                  {index < currentJob.jobGraphTrail.length - 1 ? (
-                    <MaterialIcons color="rgba(100, 148, 142, 1)" name="arrow-forward-ios" size={16} />
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : (
-          <View>
-            <View style={styles.modalHeroCard}>
-              <Text style={styles.modalHeroTitle}>技能能力图谱</Text>
-              <Text style={styles.modalHeroBody}>
-                能力结构按基础、工程与证明项拆开展示，后续可直接接后端评分算法与雷达图。
-              </Text>
-            </View>
-
-            {currentJob.skillGroups.map((group) => (
-              <View key={group.label} style={styles.skillGroupCard}>
-                <Text style={styles.skillGroupTitle}>{group.label}</Text>
-                <View style={styles.skillChipWrap}>
-                  {group.items.map((item) => (
-                    <View key={item} style={styles.skillChip}>
-                      <Text style={styles.skillChipText}>{item}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
       </DetailPageModal>
 
       <DetailPageModal
