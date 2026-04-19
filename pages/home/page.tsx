@@ -22,14 +22,14 @@ import {
 } from 'react-native';
 
 import { FEED_CARDS, type FeedCard } from './feed-data';
+import { HOME_ROLE_OPTIONS, type HomeRoleId } from './home-role-config';
 import PostDetailPage from './post-detail-page';
 
-type SortTabId = 'role-1' | 'role-2' | 'role-3' | 'direction';
+type SortTabId = HomeRoleId;
 
 type SortTabItem = {
   id: SortTabId;
   label: string;
-  sortIndex: number;
 };
 
 type FeaturedCard = {
@@ -46,59 +46,43 @@ type HomePageProps = {
   onDetailVisibilityChange?: (visible: boolean) => void;
 };
 
-const SORT_TABS: SortTabItem[] = [
-  { id: 'role-1', label: '岗位一', sortIndex: 0 },
-  { id: 'role-2', label: '岗位二', sortIndex: 1 },
-  { id: 'role-3', label: '岗位三', sortIndex: 2 },
-  { id: 'direction', label: '探索方向', sortIndex: 3 },
-];
+const SORT_TABS: SortTabItem[] = HOME_ROLE_OPTIONS.map((item) => ({
+  id: item.id,
+  label: item.label,
+}));
 
-const FEATURED_CARDS: FeaturedCard[] = [
-  {
-    id: 'featured-1',
-    badge: 'Design Thinking',
-    title: '先把职业方向想明白，再谈下一步怎么走',
-    publisher: '鸡蛋网',
-    views: '28',
-    time: '12h',
-    post: FEED_CARDS[0],
-  },
-  {
-    id: 'featured-2',
-    badge: 'Creative Workflow',
-    title: '碎片时间一样能推进规划，关键是动作够小',
-    publisher: '小步实验室',
-    views: '34',
-    time: '9h',
-    post: FEED_CARDS[1],
-  },
-  {
-    id: 'featured-3',
-    badge: 'Career Signals',
-    title: '转方向先别盲学，先画清楚自己的能力地图',
-    publisher: '职业方法论',
-    views: '19',
-    time: '7h',
-    post: FEED_CARDS[2],
-  },
-  {
-    id: 'featured-4',
-    badge: 'Explore Path',
-    title: '兴趣不要只停留在想法，先做一次小验证',
-    publisher: '设计求职手册',
-    views: '23',
-    time: '5h',
-    post: FEED_CARDS[3],
-  },
-];
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase();
+}
 
 function createSortDragValues() {
   return {
-    'role-1': new Animated.Value(0),
-    'role-2': new Animated.Value(0),
-    'role-3': new Animated.Value(0),
+    cpp: new Animated.Value(0),
+    backend: new Animated.Value(0),
+    embedded: new Animated.Value(0),
     direction: new Animated.Value(0),
   } satisfies Record<SortTabId, Animated.Value>;
+}
+
+function createRoleOrderMap() {
+  return {
+    cpp: 0,
+    backend: 1,
+    embedded: 2,
+    direction: 3,
+  } satisfies Record<SortTabId, number>;
+}
+
+function buildFeaturedCard(post: FeedCard): FeaturedCard {
+  return {
+    id: `featured-${post.id}`,
+    badge: post.featuredBadge ?? post.roleLabel,
+    post,
+    publisher: post.author,
+    time: post.time,
+    title: post.title,
+    views: post.views,
+  };
 }
 
 function reorderItems<T>(items: T[], fromIndex: number, toIndex: number) {
@@ -112,9 +96,11 @@ function reorderItems<T>(items: T[], fromIndex: number, toIndex: number) {
 
 export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
   const [sortTabs, setSortTabs] = useState<SortTabItem[]>(SORT_TABS);
+  const [activeRoleId, setActiveRoleId] = useState<SortTabId>(SORT_TABS[0].id);
   const [isSortEditing, setIsSortEditing] = useState(false);
   const [draggingSortId, setDraggingSortId] = useState<SortTabId | null>(null);
   const [activeFeature, setActiveFeature] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedFeedCard, setSelectedFeedCard] = useState<FeedCard | null>(null);
   const { width: screenWidth } = useWindowDimensions();
   const shakeValue = useRef(new Animated.Value(0)).current;
@@ -128,12 +114,48 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
   const sortTabsGap = 10;
   const sortTabsWidth = contentWidth - sortButtonWidth - sortTabsGap;
   const sortChipGap = 8;
-  const sortChipHeight = 34;
+  const sortChipHeight = 44;
   const sortSlotWidth =
     sortTabs.length > 0 ? (sortTabsWidth - sortChipGap * (sortTabs.length - 1)) / sortTabs.length : 0;
   const sortSlotSpan = sortSlotWidth + sortChipGap;
-  const sortedFeaturedCards = FEATURED_CARDS;
-  const sortedFeedCards = FEED_CARDS;
+  const normalizedSearchQuery = normalizeSearchText(searchQuery);
+  const hasSearchQuery = normalizedSearchQuery.length > 0;
+  const roleOrderMap = sortTabs.reduce<Record<SortTabId, number>>((result, item, index) => {
+    result[item.id] = index;
+
+    return result;
+  }, createRoleOrderMap());
+  const searchableFeedCards = FEED_CARDS.filter((card) => {
+    if (!hasSearchQuery) {
+      return true;
+    }
+
+    const searchableContent = [card.title, card.author, card.roleLabel, ...card.body].join('\n');
+
+    return normalizeSearchText(searchableContent).includes(normalizedSearchQuery);
+  });
+  const sortedFeaturedCards = sortTabs
+    .map((item) => searchableFeedCards.find((card) => card.roleId === item.id && card.featured))
+    .filter((card): card is FeedCard => card !== undefined)
+    .map(buildFeaturedCard);
+  const sortedFeedCards = searchableFeedCards
+    .map((card, index) => ({ card, index }))
+    .sort((left, right) => {
+      const roleOffset = roleOrderMap[left.card.roleId] - roleOrderMap[right.card.roleId];
+
+      if (roleOffset !== 0) {
+        return roleOffset;
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.card);
+  const visibleFeaturedCards = hasSearchQuery
+    ? []
+    : sortedFeaturedCards.filter((card) => card.post.roleId === activeRoleId);
+  const visibleFeedCards = hasSearchQuery
+    ? sortedFeedCards
+    : sortedFeedCards.filter((card) => card.roleId === activeRoleId);
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -150,6 +172,10 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
       onDetailVisibilityChange?.(false);
     };
   }, [onDetailVisibilityChange]);
+
+  useEffect(() => {
+    setActiveFeature(0);
+  }, [activeRoleId, hasSearchQuery, sortTabs]);
 
   useEffect(() => {
     if (!isSortEditing) {
@@ -194,6 +220,16 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
     });
   };
 
+  useEffect(() => {
+    if (!hasSearchQuery) {
+      return;
+    }
+
+    resetSortDragValues();
+    setDraggingSortId(null);
+    setIsSortEditing(false);
+  }, [hasSearchQuery]);
+
   const handleSortModePress = () => {
     Keyboard.dismiss();
     resetSortDragValues();
@@ -232,6 +268,7 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
       useNativeDriver: true,
     }).start();
 
+    setActiveRoleId(itemId);
     setDraggingSortId(null);
   };
 
@@ -259,8 +296,14 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
     });
 
   const handleFeaturedMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (visibleFeaturedCards.length === 0) {
+      setActiveFeature(0);
+
+      return;
+    }
+
     const nextIndex = Math.round(event.nativeEvent.contentOffset.x / featuredSnapInterval);
-    const safeIndex = Math.max(0, Math.min(sortedFeaturedCards.length - 1, nextIndex));
+    const safeIndex = Math.max(0, Math.min(visibleFeaturedCards.length - 1, nextIndex));
 
     setActiveFeature(safeIndex);
   };
@@ -296,15 +339,23 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
         {...panResponder?.panHandlers}
       >
         <Pressable
-          disabled
+          disabled={isSortEditing}
+          onPress={() => {
+            Keyboard.dismiss();
+            setActiveRoleId(item.id);
+          }}
           style={[
             styles.sortTabChip,
             { height: sortChipHeight },
+            !isSortEditing && activeRoleId === item.id && styles.sortTabChipActive,
             isSortEditing && styles.sortTabChipEditing,
             dragging && styles.sortTabChipDragging,
           ]}
         >
-          <Text numberOfLines={1} style={styles.sortTabText}>
+          <Text
+            numberOfLines={2}
+            style={[styles.sortTabText, !isSortEditing && activeRoleId === item.id && styles.sortTabTextActive]}
+          >
             {item.label}
           </Text>
         </Pressable>
@@ -324,7 +375,7 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
           styles.featuredCard,
           {
             width: featuredCardWidth,
-            marginRight: index === sortedFeaturedCards.length - 1 ? 0 : featuredGap,
+            marginRight: index === visibleFeaturedCards.length - 1 ? 0 : featuredGap,
           },
           pressed && styles.featuredCardPressed,
         ]}
@@ -335,10 +386,12 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
           start={{ x: 0, y: 0 }}
           style={styles.featuredImageFrame}
         >
-          <Image resizeMode="contain" source={item.post.cover} style={styles.featuredImage} />
+          <Image resizeMode="cover" source={item.post.cover} style={styles.featuredImage} />
 
           <View style={styles.featuredBadge}>
-            <Text style={styles.featuredBadgeText}>{item.badge}</Text>
+            <Text numberOfLines={1} style={styles.featuredBadgeText}>
+              {item.badge}
+            </Text>
           </View>
         </LinearGradient>
 
@@ -384,7 +437,7 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
         start={{ x: 0, y: 0 }}
         style={styles.feedThumb}
       >
-        <Image resizeMode="contain" source={item.cover} style={styles.feedThumbImage} />
+        <Image resizeMode="cover" source={item.cover} style={styles.feedThumbImage} />
       </LinearGradient>
 
       <View style={styles.feedCardBody}>
@@ -392,20 +445,10 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
           {item.title}
         </Text>
 
-        <View style={styles.metaRow}>
-          <Text numberOfLines={1} style={styles.metaText}>
-            {item.author}
+        <View style={styles.feedSourceBadge}>
+          <Text numberOfLines={1} style={styles.feedSourceText}>
+            来源：{item.author}
           </Text>
-          <View style={styles.metaDot} />
-          <Ionicons color="rgba(174, 180, 186, 1)" name="chatbubble-ellipses-outline" size={14} />
-          <Text style={styles.metaText}>{item.views}</Text>
-          <Text style={styles.metaText}>{item.time}</Text>
-          <Ionicons
-            color="rgba(174, 180, 186, 1)"
-            name="ellipsis-horizontal"
-            size={16}
-            style={styles.trailingMetaIcon}
-          />
         </View>
       </View>
     </Pressable>
@@ -422,93 +465,110 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
           <View style={styles.searchBox}>
             <Ionicons color="rgba(126, 140, 147, 1)" name="search-outline" size={14} />
             <TextInput
-              placeholder="搜索"
-              placeholderTextColor="rgba(145, 153, 160, 1)"
+              onChangeText={setSearchQuery}
               style={styles.searchInput}
+              value={searchQuery}
             />
           </View>
         </View>
 
-        <View style={[styles.tabsSection, { width: contentWidth }]}>
-          <View style={styles.sortRow}>
-            <Pressable
-              hitSlop={8}
-              onPress={handleSortModePress}
-              style={[styles.sortActionButton, isSortEditing && styles.sortActionButtonActive]}
-            >
-              <Text style={[styles.sortActionText, isSortEditing && styles.sortActionTextActive]}>
-                {isSortEditing ? '完成' : '排序'}
-              </Text>
-            </Pressable>
+        {!hasSearchQuery ? (
+          <View style={[styles.tabsSection, { width: contentWidth }]}>
+            <View style={styles.sortRow}>
+              <Pressable
+                hitSlop={8}
+                onPress={handleSortModePress}
+                style={[styles.sortActionButton, isSortEditing && styles.sortActionButtonActive]}
+              >
+                <Text style={[styles.sortActionText, isSortEditing && styles.sortActionTextActive]}>
+                  {isSortEditing ? '完成' : '排序'}
+                </Text>
+              </Pressable>
 
-            <View
-              style={[styles.sortTabsWrap, { width: sortTabsWidth, paddingTop: isSortEditing ? 34 : 0 }]}
-            >
-              {isSortEditing ? (
-                <View style={styles.sortHintBubble}>
-                  <Text style={styles.sortHintText}>拖动方框排序</Text>
-                  <View style={styles.sortHintCaret} />
+              <View
+                style={[styles.sortTabsWrap, { width: sortTabsWidth, paddingTop: isSortEditing ? 38 : 0 }]}
+              >
+                {isSortEditing ? (
+                  <View style={styles.sortHintBubble}>
+                    <Text style={styles.sortHintText}>拖动方框排序</Text>
+                    <View style={styles.sortHintCaret} />
+                  </View>
+                ) : null}
+
+                <View style={[styles.sortTabsTrack, { height: sortChipHeight }]}>
+                  {sortTabs.map(renderSortTab)}
                 </View>
-              ) : null}
-
-              <View style={[styles.sortTabsTrack, { height: sortChipHeight }]}>
-                {sortTabs.map(renderSortTab)}
               </View>
             </View>
-          </View>
 
-          <Divider color="rgba(48, 54, 50, 0.84)" style={styles.tabsDivider} />
-        </View>
+            <Divider color="rgba(48, 54, 50, 0.84)" style={styles.tabsDivider} />
+          </View>
+        ) : null}
       </View>
 
       <FlatList
-        data={sortedFeedCards}
+        data={visibleFeedCards}
         initialNumToRender={4}
         ItemSeparatorComponent={() => <View style={styles.feedSpacer} />}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={
-          <View style={styles.feedHeader}>
-            <FlatList
-              data={sortedFeaturedCards}
-              decelerationRate="fast"
-              disableIntervalMomentum
-              getItemLayout={(_, index) => ({
-                length: featuredSnapInterval,
-                offset: featuredSnapInterval * index,
-                index,
-              })}
-              horizontal
-              initialNumToRender={3}
-              keyExtractor={(item) => item.id}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              maxToRenderPerBatch={3}
-              nestedScrollEnabled
-              onMomentumScrollEnd={handleFeaturedMomentumEnd}
-              removeClippedSubviews={Platform.OS === 'android'}
-              renderItem={({ item, index }) => renderFeaturedCard(item, index)}
-              showsHorizontalScrollIndicator={false}
-              snapToAlignment="start"
-              snapToInterval={featuredSnapInterval}
-              windowSize={3}
-              contentContainerStyle={{
-                paddingLeft: featuredSideInset,
-                paddingRight: featuredSideInset + 36,
-              }}
-              style={styles.featuredList}
-            />
-
-            <View style={styles.paginationRow}>
-              {sortedFeaturedCards.map((item, index) => (
-                <View
-                  key={item.id}
-                  style={[styles.paginationDot, index === activeFeature && styles.paginationDotActive]}
-                />
-              ))}
+        ListEmptyComponent={
+          hasSearchQuery ? (
+            <View style={[styles.emptyStateCard, { width: contentWidth }]}>
+              <Text style={styles.emptyStateTitle}>未找到相关文章</Text>
+              <Text style={styles.emptyStateBody}>可以试试岗位名、文章标题或来源关键词。</Text>
             </View>
-          </View>
+          ) : null
+        }
+        ListHeaderComponent={
+          !hasSearchQuery ? (
+            <View style={styles.feedHeader}>
+              <FlatList
+                key={`featured-${activeRoleId}-${sortTabs.map((item) => item.id).join('-')}`}
+                data={visibleFeaturedCards}
+                decelerationRate="fast"
+                disableIntervalMomentum
+                getItemLayout={(_, index) => ({
+                  length: featuredSnapInterval,
+                  offset: featuredSnapInterval * index,
+                  index,
+                })}
+                horizontal
+                initialNumToRender={3}
+                keyExtractor={(item) => item.id}
+                keyboardDismissMode="on-drag"
+                keyboardShouldPersistTaps="handled"
+                maxToRenderPerBatch={3}
+                nestedScrollEnabled
+                onMomentumScrollEnd={handleFeaturedMomentumEnd}
+                removeClippedSubviews={Platform.OS === 'android'}
+                renderItem={({ item, index }) => renderFeaturedCard(item, index)}
+                showsHorizontalScrollIndicator={false}
+                snapToAlignment="start"
+                snapToInterval={featuredSnapInterval}
+                windowSize={3}
+                contentContainerStyle={{
+                  paddingLeft: featuredSideInset,
+                  paddingRight: featuredSideInset + 36,
+                }}
+                style={styles.featuredList}
+              />
+
+              <View style={styles.paginationRow}>
+                {visibleFeaturedCards.map((item, index) => (
+                  <View
+                    key={item.id}
+                    style={[styles.paginationDot, index === activeFeature && styles.paginationDotActive]}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : (
+            <View style={[styles.searchSummaryCard, { width: contentWidth }]}>
+              <Text style={styles.searchSummaryText}>根据“{searchQuery.trim()}”找到 {sortedFeedCards.length} 篇文章</Text>
+            </View>
+          )
         }
         maxToRenderPerBatch={4}
         removeClippedSubviews={Platform.OS === 'android'}
@@ -521,7 +581,7 @@ export default function HomePage({ onDetailVisibilityChange }: HomePageProps) {
 
       {selectedFeedCard ? (
         <View style={styles.detailOverlay}>
-          <PostDetailPage onBack={() => setSelectedFeedCard(null)} post={selectedFeedCard} />
+          <PostDetailPage key={selectedFeedCard.id} onBack={() => setSelectedFeedCard(null)} post={selectedFeedCard} />
         </View>
       ) : null}
     </View>
@@ -669,9 +729,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.76)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.94)',
+  },
+  sortTabChipActive: {
+    backgroundColor: 'rgba(90, 180, 154, 0.18)',
+    borderColor: 'rgba(90, 180, 154, 0.9)',
   },
   sortTabChipEditing: {
     backgroundColor: 'rgba(255, 255, 255, 0.96)',
@@ -688,10 +753,15 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   sortTabText: {
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '500',
+    textAlign: 'center',
     color: 'rgba(136, 145, 142, 1)',
+  },
+  sortTabTextActive: {
+    color: 'rgba(41, 115, 102, 1)',
+    fontWeight: '700',
   },
   tabsDivider: {
     height: 1,
@@ -707,6 +777,22 @@ const styles = StyleSheet.create({
   },
   feedHeader: {
     marginBottom: 18,
+  },
+  searchSummaryCard: {
+    alignSelf: 'center',
+    marginBottom: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(227, 244, 239, 0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(173, 216, 205, 0.92)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  searchSummaryText: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: 'rgba(31, 48, 44, 1)',
   },
   feedSpacer: {
     height: 16,
@@ -735,8 +821,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   featuredImage: {
-    width: '82%',
-    height: '82%',
+    width: '100%',
+    height: '100%',
   },
   featuredBadge: {
     position: 'absolute',
@@ -744,12 +830,13 @@ const styles = StyleSheet.create({
     left: 14,
     borderRadius: 999,
     backgroundColor: 'rgba(157, 212, 113, 0.96)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    maxWidth: '68%',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   featuredBadgeText: {
-    fontSize: 13,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 14,
     fontWeight: '500',
     color: 'rgba(73, 95, 53, 1)',
   },
@@ -821,8 +908,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   feedThumbImage: {
-    width: '82%',
-    height: '82%',
+    width: '100%',
+    height: '100%',
   },
   feedCardBody: {
     flex: 1,
@@ -835,5 +922,41 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     fontWeight: '500',
     color: 'rgba(28, 33, 36, 1)',
+  },
+  feedSourceBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: 'rgba(237, 244, 242, 1)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  feedSourceText: {
+    maxWidth: 170,
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '500',
+    color: 'rgba(100, 122, 118, 1)',
+  },
+  emptyStateCard: {
+    alignSelf: 'center',
+    marginTop: 18,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.94)',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(231, 235, 234, 0.95)',
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: 'rgba(41, 46, 49, 1)',
+  },
+  emptyStateBody: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 22,
+    color: 'rgba(123, 132, 138, 1)',
   },
 });

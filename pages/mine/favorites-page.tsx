@@ -15,13 +15,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { FEED_CARDS, type FeedCard } from '../home/feed-data';
+import { HOME_ROLE_OPTIONS, type HomeRoleId } from '../home/home-role-config';
+import PostDetailPage from '../home/post-detail-page';
+
 type FavoritesPageProps = {
   onBack?: () => void;
 };
 
 type FavoriteFolder = {
   colors: [string, string];
-  count: number;
   id: string;
   title: string;
 };
@@ -30,95 +33,39 @@ type FavoriteItem = {
   folderId: string;
   id: string;
   joinedPlan: boolean;
+  post: FeedCard;
   saved: boolean;
   savedAt: number;
-  summary: string;
-  title: string;
+};
+
+const ROLE_FOLDER_COLORS: Record<HomeRoleId, [string, string]> = {
+  backend: ['rgba(32, 191, 202, 1)', 'rgba(76, 210, 170, 1)'],
+  cpp: ['rgba(22, 206, 203, 1)', 'rgba(18, 168, 190, 1)'],
+  direction: ['rgba(72, 203, 201, 1)', 'rgba(26, 168, 220, 1)'],
+  embedded: ['rgba(53, 188, 213, 1)', 'rgba(89, 195, 164, 1)'],
 };
 
 const INITIAL_FOLDERS: FavoriteFolder[] = [
   {
     id: 'create',
     title: '新建文件夹',
-    count: 27,
     colors: ['rgba(22, 206, 203, 1)', 'rgba(65, 194, 171, 1)'],
   },
-  {
-    id: 'folder-1',
-    title: '计算机',
-    count: 123,
-    colors: ['rgba(22, 206, 203, 1)', 'rgba(18, 168, 190, 1)'],
-  },
-  {
-    id: 'folder-2',
-    title: '数据科学',
-    count: 65,
-    colors: ['rgba(32, 191, 202, 1)', 'rgba(76, 210, 170, 1)'],
-  },
-  {
-    id: 'folder-3',
-    title: '产品方向',
-    count: 41,
-    colors: ['rgba(72, 203, 201, 1)', 'rgba(26, 168, 220, 1)'],
-  },
+  ...HOME_ROLE_OPTIONS.filter((option) => FEED_CARDS.some((card) => card.roleId === option.id)).map((option) => ({
+    id: option.id,
+    title: option.label,
+    colors: ROLE_FOLDER_COLORS[option.id],
+  })),
 ];
 
-const INITIAL_ITEMS: FavoriteItem[] = [
-  {
-    id: 'favorite-1',
-    folderId: 'folder-1',
-    title: '标题一',
-    summary: '把课程项目整理成更像求职作品的表达方式，适合后续直接放进简历或作品集。',
-    saved: true,
-    joinedPlan: false,
-    savedAt: 7,
-  },
-  {
-    id: 'favorite-2',
-    folderId: 'folder-2',
-    title: '标题二',
-    summary: '如果你打算转向数据科学，先验证自己更适合分析、建模还是产品分析这个交叉位置。',
-    saved: true,
-    joinedPlan: true,
-    savedAt: 6,
-  },
-  {
-    id: 'favorite-3',
-    folderId: 'folder-1',
-    title: '标题三',
-    summary: '作品集不一定多，关键是每个案例都能讲清楚问题、过程、决策和结果。',
-    saved: true,
-    joinedPlan: false,
-    savedAt: 5,
-  },
-  {
-    id: 'favorite-4',
-    folderId: 'folder-3',
-    title: '标题四',
-    summary: '岗位信息收集时不要只看 JD，可以额外看团队博客、面经和真实项目语境。',
-    saved: false,
-    joinedPlan: false,
-    savedAt: 4,
-  },
-  {
-    id: 'favorite-5',
-    folderId: 'folder-2',
-    title: '标题五',
-    summary: '做职业规划时，先把想尝试的方向控制在两个以内，更容易做出有效验证。',
-    saved: true,
-    joinedPlan: false,
-    savedAt: 3,
-  },
-  {
-    id: 'favorite-6',
-    folderId: 'folder-3',
-    title: '标题六',
-    summary: '面试准备时，把经历拆成情境、动作、结果三段，比平铺经历更容易说清重点。',
-    saved: false,
-    joinedPlan: false,
-    savedAt: 2,
-  },
-];
+const INITIAL_ITEMS: FavoriteItem[] = FEED_CARDS.map((post, index) => ({
+  id: post.id,
+  folderId: post.roleId,
+  joinedPlan: false,
+  post,
+  saved: true,
+  savedAt: FEED_CARDS.length - index,
+}));
 
 export default function FavoritesPage({ onBack }: FavoritesPageProps) {
   const [folders, setFolders] = useState(INITIAL_FOLDERS);
@@ -126,6 +73,7 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [sortDescending, setSortDescending] = useState(true);
+  const [selectedFeedCard, setSelectedFeedCard] = useState<FeedCard | null>(null);
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const swipeTranslateX = useRef(new Animated.Value(0)).current;
@@ -176,14 +124,13 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
   });
 
   const handleCreateFolder = () => {
-    const nextIndex = folders.filter((folder) => folder.id !== 'create').length + 1;
+    const nextIndex = folders.filter((folder) => folder.id.startsWith('folder-created-')).length + 1;
 
     setFolders((current) => [
       ...current,
       {
         id: `folder-created-${nextIndex}`,
         title: `新文件夹${nextIndex}`,
-        count: 0,
         colors: ['rgba(59, 204, 188, 1)', 'rgba(31, 169, 216, 1)'],
       },
     ]);
@@ -202,12 +149,22 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
   };
 
   const normalizedKeyword = searchKeyword.trim().toLowerCase();
+  const savedItems = items.filter((item) => item.saved);
+  const folderCountMap = savedItems.reduce<Record<string, number>>((result, item) => {
+    result[item.folderId] = (result[item.folderId] ?? 0) + 1;
+
+    return result;
+  }, {});
   const visibleItems = items
+    .filter((item) => item.saved)
     .filter((item) => (selectedFolderId ? item.folderId === selectedFolderId : true))
     .filter((item) =>
       normalizedKeyword.length === 0
         ? true
-        : `${item.title}${item.summary}`.toLowerCase().includes(normalizedKeyword)
+        : [item.post.title, item.post.author, item.post.roleLabel, item.post.body[0]]
+            .join('\n')
+            .toLowerCase()
+            .includes(normalizedKeyword)
     )
     .sort((left, right) => (sortDescending ? right.savedAt - left.savedAt : left.savedAt - right.savedAt));
 
@@ -276,6 +233,7 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
               {folders.map((folder) => {
                 const active = selectedFolderId === folder.id;
                 const isCreateCard = folder.id === 'create';
+                const folderCount = folderCountMap[folder.id] ?? 0;
 
                 return (
                   <Pressable
@@ -302,7 +260,7 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
                       <View style={styles.folderDecorationLarge} />
                       <View style={styles.folderDecorationSmall} />
                       <Text style={styles.folderTitle}>{folder.title}</Text>
-                      <Text style={styles.folderCount}>{folder.count}条内容</Text>
+                      <Text style={styles.folderCount}>{isCreateCard ? '点击创建' : `${folderCount}条内容`}</Text>
                     </LinearGradient>
                   </Pressable>
                 );
@@ -330,47 +288,72 @@ export default function FavoritesPage({ onBack }: FavoritesPageProps) {
             </View>
 
             <View style={styles.listWrap}>
-              {visibleItems.map((item) => (
-                <View key={item.id} style={styles.favoriteItem}>
-                  <View style={styles.favoriteCopy}>
-                    <Text style={styles.favoriteTitle}>{item.title}</Text>
-                    <Text style={styles.favoriteSummary}>{item.summary}</Text>
-                  </View>
-
-                  <View style={styles.favoriteActions}>
+              {visibleItems.length > 0 ? (
+                visibleItems.map((item) => (
+                  <View key={item.id} style={styles.favoriteItem}>
                     <Pressable
-                      hitSlop={8}
-                      onPress={() => toggleJoinedPlan(item.id)}
-                      style={[
-                        styles.planActionButton,
-                        item.joinedPlan && styles.planActionButtonJoined,
-                      ]}
+                      onPress={() => setSelectedFeedCard(item.post)}
+                      style={({ pressed }) => [styles.favoriteCopy, pressed && styles.favoriteCopyPressed]}
                     >
-                      {item.joinedPlan ? (
-                        <Text style={styles.planActionJoinedText}>已加入规划</Text>
-                      ) : (
-                        <MaterialIcons color="rgba(37, 44, 51, 1)" name="add" size={18} />
-                      )}
+                      <Text style={styles.favoriteTitle}>{item.post.title}</Text>
+                      <Text numberOfLines={3} style={styles.favoriteSummary}>
+                        {item.post.body[0]}
+                      </Text>
+                      <Text numberOfLines={1} style={styles.favoriteMeta}>
+                        {`${item.post.roleLabel} · ${item.post.author} · ${item.post.time}`}
+                      </Text>
                     </Pressable>
 
-                    <Pressable
-                      hitSlop={8}
-                      onPress={() => toggleSaved(item.id)}
-                      style={styles.starButton}
-                    >
-                      <Ionicons
-                        color="rgba(20, 26, 32, 1)"
-                        name={item.saved ? 'star' : 'star-outline'}
-                        size={20}
-                      />
-                    </Pressable>
+                    <View style={styles.favoriteActions}>
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => toggleJoinedPlan(item.id)}
+                        style={[
+                          styles.planActionButton,
+                          item.joinedPlan && styles.planActionButtonJoined,
+                        ]}
+                      >
+                        {item.joinedPlan ? (
+                          <Text style={styles.planActionJoinedText}>已加入规划</Text>
+                        ) : (
+                          <MaterialIcons color="rgba(37, 44, 51, 1)" name="add" size={18} />
+                        )}
+                      </Pressable>
+
+                      <Pressable
+                        hitSlop={8}
+                        onPress={() => toggleSaved(item.id)}
+                        style={styles.starButton}
+                      >
+                        <Ionicons
+                          color="rgba(20, 26, 32, 1)"
+                          name={item.saved ? 'star' : 'star-outline'}
+                          size={20}
+                        />
+                      </Pressable>
+                    </View>
                   </View>
+                ))
+              ) : (
+                <View style={styles.emptyStateCard}>
+                  <Text style={styles.emptyStateTitle}>当前没有匹配的收藏文章</Text>
+                  <Text style={styles.emptyStateBody}>
+                    {selectedFolderId || normalizedKeyword.length > 0
+                      ? '试试切换文件夹或搜索词。'
+                      : `首页文章已全部移出收藏，当前共剩 ${savedItems.length} 篇。`}
+                  </Text>
                 </View>
-              ))}
+              )}
             </View>
           </View>
         </ScrollView>
       </Animated.View>
+
+      {selectedFeedCard ? (
+        <View style={styles.detailOverlay}>
+          <PostDetailPage key={selectedFeedCard.id} onBack={() => setSelectedFeedCard(null)} post={selectedFeedCard} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -383,6 +366,10 @@ const styles = StyleSheet.create({
   pageLayer: {
     flex: 1,
     backgroundColor: '#ffffff',
+  },
+  detailOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 80,
   },
   headerBar: {
     position: 'absolute',
@@ -553,6 +540,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 12,
   },
+  favoriteCopyPressed: {
+    opacity: 0.72,
+  },
   favoriteTitle: {
     color: 'rgba(26, 31, 36, 1)',
     fontSize: 16,
@@ -565,6 +555,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '500',
+  },
+  favoriteMeta: {
+    marginTop: 8,
+    color: 'rgba(121, 128, 136, 1)',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
   },
   favoriteActions: {
     width: 52,
@@ -597,5 +594,27 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emptyStateCard: {
+    marginTop: 10,
+    borderRadius: 18,
+    backgroundColor: 'rgba(247, 249, 251, 1)',
+    paddingHorizontal: 18,
+    paddingVertical: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(230, 234, 239, 1)',
+  },
+  emptyStateTitle: {
+    color: 'rgba(24, 30, 36, 1)',
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  emptyStateBody: {
+    marginTop: 6,
+    color: 'rgba(107, 114, 124, 1)',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
   },
 });

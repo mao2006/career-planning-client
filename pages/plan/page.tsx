@@ -17,6 +17,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import JobGraphPage from './job-graph-page';
 import SkillGraphPage from './skill-graph-page';
+import {
+  AlternativeTaskDetailPage,
+  TaskDetailPage,
+  type TaskAlternativeCandidate,
+  type TaskDetailTask,
+  type TaskFrequencyMode,
+} from './task-detail-page';
+import WeeklySchedulePage, { type WeeklyTaskPlacement } from './weekly-schedule-page';
 
 const PERIOD_OPTIONS = [
   '大二下',
@@ -111,6 +119,26 @@ type WeeklyScheduleDay = {
   items: string[];
   label: string;
 };
+
+type TaskReplacementSnapshot = TaskAlternativeCandidate & {
+  sourceTitle: string;
+};
+
+type TaskStateOverride = {
+  alternativeOffset?: number;
+  completion?: CompletionState;
+  frequency?: TaskFrequencyMode;
+  hoursPerCycle?: number;
+  progress?: number;
+  replacement?: TaskReplacementSnapshot;
+  timeEnd?: string;
+  timeStart?: string;
+};
+
+type ResolvedLearningTask = LearningTask &
+  TaskDetailTask & {
+    alternativeOffset: number;
+  };
 
 const JOB_PLANS: JobPlan[] = [
   {
@@ -811,6 +839,363 @@ function buildWeeklySchedule(job: JobPlan, period: PeriodOption): WeeklySchedule
   }
 }
 
+const PERIOD_MONTH_OPTIONS: Record<PeriodOption, string[]> = {
+  '大二下': ['2026年2月', '2026年3月', '2026年4月', '2026年5月', '2026年6月', '2026年7月'],
+  '大二-大三暑假': ['2026年7月', '2026年8月', '2026年9月'],
+  '大三上': ['2026年9月', '2026年10月', '2026年11月', '2026年12月', '2027年1月'],
+  '大三寒假': ['2027年1月', '2027年2月', '2027年3月'],
+  '大三下': ['2027年3月', '2027年4月', '2027年5月', '2027年6月', '2027年7月'],
+  '大三-大四暑假': ['2027年7月', '2027年8月', '2027年9月'],
+  '大四上': ['2027年9月', '2027年10月', '2027年11月', '2027年12月', '2028年1月'],
+  '大四寒假': ['2028年1月', '2028年2月', '2028年3月'],
+  '大四下': ['2028年3月', '2028年4月', '2028年5月', '2028年6月', '2028年7月'],
+};
+
+function parseMonthLabel(label: string) {
+  const match = label.match(/(\d{4})年(\d{1,2})月/);
+
+  if (!match) {
+    return null;
+  }
+
+  return Number.parseInt(match[1], 10) * 100 + Number.parseInt(match[2], 10);
+}
+
+function parseTaskWindowLabel(windowLabel?: string) {
+  if (!windowLabel) {
+    return null;
+  }
+
+  const match = windowLabel.match(/(\d{4}年\d{1,2}月)-(\d{4}年\d{1,2}月)/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    timeStart: match[1],
+    timeEnd: match[2],
+  };
+}
+
+function uniqueMonthOptions(options: string[]) {
+  const seen = new Set<string>();
+
+  return options.filter((option) => {
+    if (seen.has(option)) {
+      return false;
+    }
+
+    seen.add(option);
+    return true;
+  });
+}
+
+function buildTimeOptions(period: PeriodOption, extraLabels: string[] = []) {
+  return uniqueMonthOptions([...PERIOD_MONTH_OPTIONS[period], ...extraLabels]).sort((first, second) => {
+    const firstValue = parseMonthLabel(first) ?? 0;
+    const secondValue = parseMonthLabel(second) ?? 0;
+
+    return firstValue - secondValue;
+  });
+}
+
+function buildDefaultTaskTiming(task: LearningTask, period: PeriodOption) {
+  const parsedRange = parseTaskWindowLabel(task.windowLabel);
+  const periodOptions = buildTimeOptions(period, parsedRange ? [parsedRange.timeStart, parsedRange.timeEnd] : []);
+  const focusedFallbackEndIndex = Math.min(periodOptions.length - 1, 2);
+  const accumulateFallbackEndIndex = Math.min(periodOptions.length - 1, 3);
+
+  return {
+    timeStart: parsedRange?.timeStart ?? periodOptions[0],
+    timeEnd:
+      parsedRange?.timeEnd ??
+      periodOptions[task.type === 'focused' ? focusedFallbackEndIndex : accumulateFallbackEndIndex],
+    frequency: task.type === 'accumulate' ? ('每周' as const) : undefined,
+    hoursPerCycle: task.type === 'accumulate' ? 3 : undefined,
+  };
+}
+
+function resolveTaskWithOverride(task: LearningTask, override: TaskStateOverride | undefined, period: PeriodOption): ResolvedLearningTask {
+  const defaultTiming = buildDefaultTaskTiming(task, period);
+  const replacement = override?.replacement;
+  const resolvedType = replacement?.type ?? task.type;
+  const resolvedTitle = replacement?.title ?? task.title;
+  const resolvedImportance = replacement?.importance ?? task.importance;
+  const resolvedDetail = replacement?.detail ?? task.detail;
+  const resolvedDeliverables = replacement?.deliverables ?? task.deliverables;
+  const resolvedProgress =
+    resolvedType === 'accumulate'
+      ? Math.max(0, Math.min(override?.progress ?? (replacement ? 0 : task.progress ?? 0), 100))
+      : undefined;
+  const resolvedCompletion =
+    resolvedType === 'accumulate'
+      ? resolvedProgress === 100
+        ? 'done'
+        : 'todo'
+      : override?.completion ?? (replacement ? 'todo' : task.completion);
+
+  return {
+    ...task,
+    completion: resolvedCompletion,
+    deliverables: resolvedDeliverables,
+    detail: resolvedDetail,
+    hoursPerCycle: resolvedType === 'accumulate' ? override?.hoursPerCycle ?? replacement?.hoursPerCycle ?? defaultTiming.hoursPerCycle : undefined,
+    id: task.id,
+    importance: resolvedImportance,
+    progress: resolvedProgress,
+    replacementOriginTitle: replacement?.sourceTitle,
+    scheduled: task.scheduled,
+    timeEnd: override?.timeEnd ?? replacement?.timeEnd ?? defaultTiming.timeEnd,
+    timeStart: override?.timeStart ?? replacement?.timeStart ?? defaultTiming.timeStart,
+    title: resolvedTitle,
+    type: resolvedType,
+    windowLabel: task.windowLabel,
+    frequency: resolvedType === 'accumulate' ? override?.frequency ?? replacement?.frequency ?? defaultTiming.frequency : undefined,
+    alternativeOffset: override?.alternativeOffset ?? 0,
+  };
+}
+
+function buildAlternativePool(task: ResolvedLearningTask, job: JobPlan): TaskAlternativeCandidate[] {
+  const sharedTiming = {
+    timeStart: task.timeStart,
+    timeEnd: task.timeEnd,
+    frequency: task.type === 'accumulate' ? task.frequency ?? '每周' : undefined,
+    hoursPerCycle: task.type === 'accumulate' ? task.hoursPerCycle ?? 3 : undefined,
+  };
+
+  const focusedAlternativesByJob: Record<JobPlan['id'], Array<Omit<TaskAlternativeCandidate, 'frequency' | 'hoursPerCycle' | 'timeEnd' | 'timeStart' | 'type'>>> = {
+    'cpp-dev': [
+      {
+        id: `${task.id}-alt-hackathon`,
+        title: '研发竞赛冲刺',
+        importance: 4.5,
+        reason: '更容易在短时间里形成代码、答辩和团队协作三类证明材料。',
+        detail: '围绕目标岗位要求挑选一个偏工程实现的竞赛主题，重点突出模块 owner、问题定位和结果展示。',
+        deliverables: ['竞赛项目仓库', '过程拆解文档', '结果答辩材料'],
+      },
+      {
+        id: `${task.id}-alt-lab`,
+        title: '实验室研发项目',
+        importance: 4.5,
+        reason: '比纯课程任务更接近真实研发环境，更适合强化岗位语境。',
+        detail: '优先选择能接触 Linux、模块协作和调试流程的实验室项目，把过程写成岗位化表达。',
+        deliverables: ['实验室项目说明', '核心模块记录', '阶段复盘'],
+      },
+      {
+        id: `${task.id}-alt-open-source`,
+        title: '开源协作任务',
+        importance: 4,
+        reason: '可以补齐代码协作与问题收敛能力，也更利于面试讲述。',
+        detail: '选择一个难度适中的开源项目，从 issue 分析、修复到提交流程完整走通一次。',
+        deliverables: ['PR 记录', '问题定位笔记', '协作文档'],
+      },
+      {
+        id: `${task.id}-alt-bootcamp`,
+        title: '企业实训项目',
+        importance: 4,
+        reason: '如果现有任务推进资源不足，实训项目更容易在短周期内获得外部证明。',
+        detail: '优先选和目标岗位贴近的企业项目，重点沉淀需求拆解、模块交付和结果汇报。',
+        deliverables: ['项目说明', '成果展示页', '复盘总结'],
+      },
+    ],
+    'test-dev': [
+      {
+        id: `${task.id}-alt-automation`,
+        title: '自动化专项实战',
+        importance: 4.5,
+        reason: '相比泛化任务，更容易直接体现测试开发岗位的核心工程能力。',
+        detail: '围绕一个完整业务流做自动化脚手架、执行报告和失败处理，形成工程化闭环。',
+        deliverables: ['自动化仓库', '执行报告', '失败案例总结'],
+      },
+      {
+        id: `${task.id}-alt-quality`,
+        title: '质量治理项目',
+        importance: 4,
+        reason: '更能体现质量思维和跨角色协作，不只停留在执行测试。',
+        detail: '挑一个模块做质量问题收集、回归策略设计和指标跟踪，形成专项治理记录。',
+        deliverables: ['质量周报', '缺陷分析表', '策略说明'],
+      },
+      {
+        id: `${task.id}-alt-performance`,
+        title: '性能测试训练营',
+        importance: 4,
+        reason: '可作为普通测试任务的等价升级版，更有区分度。',
+        detail: '以压测、指标分析和瓶颈定位为主线做一次小型性能专项，重点沉淀方法论。',
+        deliverables: ['压测脚本', '性能报告', '优化建议'],
+      },
+      {
+        id: `${task.id}-alt-platform`,
+        title: '质量平台共建',
+        importance: 4,
+        reason: '如果目标是测试开发，这类任务更容易把工具化与平台化能力体现出来。',
+        detail: '从小工具或质量看板切入，强调复用性、接入方式和落地价值。',
+        deliverables: ['工具页面', '接入说明', '复盘记录'],
+      },
+    ],
+    embedded: [
+      {
+        id: `${task.id}-alt-driver`,
+        title: '驱动开发小项目',
+        importance: 4.5,
+        reason: '比泛化学习任务更贴近嵌入式岗位的底层能力要求。',
+        detail: '围绕一个具体外设做初始化、读写与异常处理，重点记录驱动逻辑和验证过程。',
+        deliverables: ['驱动代码', '调试记录', '接口说明'],
+      },
+      {
+        id: `${task.id}-alt-rtos`,
+        title: 'RTOS 场景实验',
+        importance: 4.5,
+        reason: '能更直接体现系统调度、任务拆分和实时性理解。',
+        detail: '选择一个 RTOS 实验场景，围绕任务调度、资源管理和异常定位形成完整过程。',
+        deliverables: ['实验代码', '系统流程图', '问题分析笔记'],
+      },
+      {
+        id: `${task.id}-alt-iot`,
+        title: 'IoT 接入实践',
+        importance: 4,
+        reason: '更容易把设备端开发和产品场景联系起来，适合替代单点实验类任务。',
+        detail: '完成一次设备联网、数据上报或远程控制的实践，把端到端链路写清楚。',
+        deliverables: ['联网演示', '接入日志', '场景说明'],
+      },
+      {
+        id: `${task.id}-alt-debug`,
+        title: '联调问题收敛专项',
+        importance: 4,
+        reason: '如果当前任务落地困难，联调专项更容易形成真实可讲的问题解决案例。',
+        detail: '围绕一类整机问题，记录现象、假设、验证与收敛过程，形成方法论总结。',
+        deliverables: ['问题定位报告', '验证记录', '复盘文档'],
+      },
+    ],
+  };
+
+  const accumulateAlternativesByJob: Record<JobPlan['id'], Array<Omit<TaskAlternativeCandidate, 'frequency' | 'hoursPerCycle' | 'timeEnd' | 'timeStart' | 'type'>>> = {
+    'cpp-dev': [
+      {
+        id: `${task.id}-alt-algo`,
+        title: '算法与数据结构精练计划',
+        importance: 4,
+        reason: '更适合作为长期滚动任务，用来稳定补齐基础短板。',
+        detail: '按周拆分刷题、复杂度复盘和题型总结，让基础能力持续可见地增长。',
+        deliverables: ['刷题记录', '题型总结', '错题复盘'],
+      },
+      {
+        id: `${task.id}-alt-linux`,
+        title: 'Linux 工程实操日志',
+        importance: 4,
+        reason: '相比泛化学习，更贴近研发岗位实际使用场景。',
+        detail: '围绕命令行、构建、调试和脚本工具做连续记录，把环境操作变成稳定能力。',
+        deliverables: ['操作日志', '问题清单', '环境搭建文档'],
+      },
+      {
+        id: `${task.id}-alt-jd`,
+        title: '岗位 JD 拆解计划',
+        importance: 3.5,
+        reason: '适合在没有大块时间时持续推进，帮助任务和岗位要求对齐。',
+        detail: '每周拆 3 到 5 个目标岗位 JD，提炼高频关键词并反向补材料。',
+        deliverables: ['JD 对照表', '补强清单', '简历改写记录'],
+      },
+      {
+        id: `${task.id}-alt-reading`,
+        title: '工程文章精读笔记',
+        importance: 3.5,
+        reason: '适合作为替代的轻量积累任务，能持续提升技术表达。',
+        detail: '围绕 C++ 工程、调试和系统设计主题做文章精读，每篇都输出结构化笔记。',
+        deliverables: ['文章笔记', '关键概念卡片', '口头讲解提纲'],
+      },
+    ],
+    'test-dev': [
+      {
+        id: `${task.id}-alt-cases`,
+        title: '接口用例库整理',
+        importance: 4,
+        reason: '适合替代零散学习任务，更能长期沉淀测试设计能力。',
+        detail: '将接口场景按正常流、异常流和风险点分类，形成一套可复用的用例模板。',
+        deliverables: ['用例库', '边界清单', '模板说明'],
+      },
+      {
+        id: `${task.id}-alt-bug`,
+        title: '缺陷复盘笔记',
+        importance: 4,
+        reason: '更强调质量思维和问题归因，适合持续积累。',
+        detail: '围绕线上或项目缺陷做复盘，拆清原因、影响和预防方案。',
+        deliverables: ['缺陷归档', '复盘文档', '预防策略'],
+      },
+      {
+        id: `${task.id}-alt-ci`,
+        title: 'CI 脚本迭代',
+        importance: 3.5,
+        reason: '如果当前任务难以推进，改成 CI 方向的积累任务更容易形成工程成果。',
+        detail: '每周优化一部分执行脚本、报告或任务编排，让自动化逐步接近流水线。',
+        deliverables: ['脚本版本记录', '接入说明', '问题清单'],
+      },
+      {
+        id: `${task.id}-alt-log`,
+        title: '日志分析训练',
+        importance: 3.5,
+        reason: '可以作为低门槛但高价值的替代积累任务。',
+        detail: '按周收集失败日志和问题案例，训练从现象到结论的结构化分析能力。',
+        deliverables: ['日志分析卡片', '定位结论汇总', '方法论笔记'],
+      },
+    ],
+    embedded: [
+      {
+        id: `${task.id}-alt-register`,
+        title: '寄存器阅读计划',
+        importance: 4,
+        reason: '适合作为长期积累任务，能稳步强化底层理解。',
+        detail: '每周阅读一部分芯片手册或寄存器说明，并输出结构化摘录与示例代码。',
+        deliverables: ['寄存器笔记', '示例代码', '概念卡片'],
+      },
+      {
+        id: `${task.id}-alt-protocol`,
+        title: '协议抓包记录',
+        importance: 4,
+        reason: '更贴近调试和接口联调场景，适合持续滚动推进。',
+        detail: '围绕串口、I2C、SPI 或网络协议记录通信过程和异常分析结论。',
+        deliverables: ['抓包记录', '协议说明', '异常归档'],
+      },
+      {
+        id: `${task.id}-alt-driver-reading`,
+        title: '驱动源码精读',
+        importance: 3.5,
+        reason: '如果当前没有硬件条件，这类替代任务更容易落地但仍然有效。',
+        detail: '每周精读一段驱动源码，拆解初始化、资源管理和错误处理逻辑。',
+        deliverables: ['源码笔记', '流程图', '关键点总结'],
+      },
+      {
+        id: `${task.id}-alt-debug-cases`,
+        title: '调试案例复盘',
+        importance: 3.5,
+        reason: '适合做成轻量但连续的积累型任务，帮助建立问题定位习惯。',
+        detail: '持续收集调试案例，按现象、原因、验证路径整理成问题库。',
+        deliverables: ['案例库', '验证路径清单', '复盘结论'],
+      },
+    ],
+  };
+
+  const sourcePool = task.type === 'focused' ? focusedAlternativesByJob[job.id] : accumulateAlternativesByJob[job.id];
+
+  return sourcePool.map((item) => ({
+    ...item,
+    type: task.type,
+    timeStart: task.timeStart,
+    timeEnd: task.timeEnd,
+    frequency: task.type === 'accumulate' ? sharedTiming.frequency : undefined,
+    hoursPerCycle: task.type === 'accumulate' ? sharedTiming.hoursPerCycle : undefined,
+  }));
+}
+
+function pickAlternatives(pool: TaskAlternativeCandidate[], offset: number) {
+  if (pool.length <= 2) {
+    return pool;
+  }
+
+  const safeOffset = offset % pool.length;
+
+  return Array.from({ length: 2 }, (_, index) => pool[(safeOffset + index) % pool.length]);
+}
+
 function ImportanceStars({ size = 18, value }: { size?: number; value: number }) {
   const stars = Array.from({ length: 5 }, (_, index) => {
     const filledThreshold = index + 1;
@@ -881,22 +1266,44 @@ type PlanPageProps = {
 };
 
 export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
-  const [activeSubview, setActiveSubview] = useState<'jobGraph' | 'main' | 'skillGraph'>('main');
+  const [activeSubview, setActiveSubview] = useState<
+    'alternativeTaskDetail' | 'jobGraph' | 'main' | 'skillGraph' | 'taskDetail' | 'weeklySchedule'
+  >('main');
   const [selectedJobId, setSelectedJobId] = useState(JOB_PLANS[0].id);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodOption>(PERIOD_OPTIONS[0]);
   const [jobDropdownOpen, setJobDropdownOpen] = useState(false);
   const [periodDropdownOpen, setPeriodDropdownOpen] = useState(false);
   const [pathExpanded, setPathExpanded] = useState(false);
-  const [activeTask, setActiveTask] = useState<LearningTask | null>(null);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [activeAlternativeId, setActiveAlternativeId] = useState<string | null>(null);
+  const [taskDetailReturnView, setTaskDetailReturnView] = useState<'main' | 'weeklySchedule'>('main');
   const [importedScheduleName, setImportedScheduleName] = useState('');
-  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [taskOverridesByKey, setTaskOverridesByKey] = useState<Record<string, Record<string, TaskStateOverride>>>({});
+  const [weeklyTaskPlacementsByKey, setWeeklyTaskPlacementsByKey] = useState<Record<string, WeeklyTaskPlacement[]>>({});
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormat>('pdf');
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const currentJob = JOB_PLANS.find((item) => item.id === selectedJobId) ?? JOB_PLANS[0];
-  const currentLearningPlan = buildLearningPlan(currentJob, selectedPeriod);
-  const currentSchedule = buildWeeklySchedule(currentJob, selectedPeriod);
+  const currentBaseLearningPlan = buildLearningPlan(currentJob, selectedPeriod);
+  const currentScheduleStorageKey = `${selectedJobId}-${selectedPeriod}`;
+  const currentTaskOverrides = taskOverridesByKey[currentScheduleStorageKey] ?? {};
+  const currentLearningPlan = {
+    ...currentBaseLearningPlan,
+    tasks: currentBaseLearningPlan.tasks.map((task) => resolveTaskWithOverride(task, currentTaskOverrides[task.id], selectedPeriod)),
+  };
+  const currentTaskMap = Object.fromEntries(currentLearningPlan.tasks.map((task) => [task.id, task]));
+  const currentBaseTaskMap = Object.fromEntries(currentBaseLearningPlan.tasks.map((task) => [task.id, task]));
+  const activeTask = activeTaskId ? (currentTaskMap[activeTaskId] as ResolvedLearningTask | undefined) ?? null : null;
+  const activeTaskAlternativePool = activeTask ? buildAlternativePool(activeTask, currentJob) : [];
+  const activeTaskAlternatives = activeTask ? pickAlternatives(activeTaskAlternativePool, activeTask.alternativeOffset) : [];
+  const activeAlternative =
+    activeAlternativeId && activeTask
+      ? activeTaskAlternativePool.find((alternative) => alternative.id === activeAlternativeId) ?? null
+      : null;
+  const activeTimeOptions = activeTask
+    ? buildTimeOptions(selectedPeriod, [activeTask.timeStart, activeTask.timeEnd, ...(activeAlternative ? [activeAlternative.timeStart, activeAlternative.timeEnd] : [])])
+    : buildTimeOptions(selectedPeriod);
   const sortedTasks = [...currentLearningPlan.tasks].sort((a, b) => b.importance - a.importance);
   const contentWidth = Math.min(screenWidth - 24, 430);
   const headerSelectorWidth = 168;
@@ -920,27 +1327,39 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
     setPeriodDropdownOpen(false);
   };
 
+  const updateTaskOverride = (taskId: string, updater: (current: TaskStateOverride | undefined) => TaskStateOverride) => {
+    setTaskOverridesByKey((current) => ({
+      ...current,
+      [currentScheduleStorageKey]: {
+        ...(current[currentScheduleStorageKey] ?? {}),
+        [taskId]: updater(current[currentScheduleStorageKey]?.[taskId]),
+      },
+    }));
+  };
+
+  const openTaskDetail = (taskId: string, returnView: 'main' | 'weeklySchedule') => {
+    setTaskDetailReturnView(returnView);
+    setActiveTaskId(taskId);
+    setActiveAlternativeId(null);
+    setActiveSubview('taskDetail');
+  };
+
   const handleJobSelect = (jobId: string) => {
     setSelectedJobId(jobId);
     setPathExpanded(false);
-    setActiveTask(null);
+    setActiveTaskId(null);
+    setActiveAlternativeId(null);
     closeMenus();
   };
 
   const handlePeriodSelect = (period: PeriodOption) => {
     setSelectedPeriod(period);
-    setActiveTask(null);
+    setActiveTaskId(null);
+    setActiveAlternativeId(null);
     closeMenus();
   };
 
-  const handleSchedulePress = async () => {
-    closeMenus();
-
-    if (importedScheduleName) {
-      setScheduleModalVisible(true);
-      return;
-    }
-
+  const handleImportSchedule = async (openAfterImport = false) => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: COURSE_FILE_TYPES,
@@ -955,10 +1374,34 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
       const asset = result.assets[0];
 
       setImportedScheduleName(asset.name || '本学期课表');
+      setWeeklyTaskPlacementsByKey((current) => {
+        const next = { ...current };
+
+        delete next[currentScheduleStorageKey];
+
+        return next;
+      });
+
+      if (openAfterImport) {
+        setActiveSubview('weeklySchedule');
+        return;
+      }
+
       Alert.alert('课表已导入', '已根据你当前的学习计划生成个性化周表，现在可以点击“查看周表”。');
     } catch (error) {
       Alert.alert('导入失败', '暂时无法读取课表文件，请稍后重试。');
     }
+  };
+
+  const handleSchedulePress = async () => {
+    closeMenus();
+
+    if (importedScheduleName) {
+      setActiveSubview('weeklySchedule');
+      return;
+    }
+
+    await handleImportSchedule(true);
   };
 
   const handleExportConfirm = () => {
@@ -975,6 +1418,108 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
 
   if (activeSubview === 'skillGraph') {
     return <SkillGraphPage onBack={() => setActiveSubview('main')} planJob={currentJob} />;
+  }
+
+  if (activeSubview === 'taskDetail' && activeTask) {
+    return (
+      <TaskDetailPage
+        key={activeTask.id}
+        alternatives={activeTaskAlternatives}
+        onBack={() => {
+          setActiveSubview(taskDetailReturnView);
+          setActiveAlternativeId(null);
+        }}
+        onOpenAlternativeDetail={(alternativeId) => {
+          setActiveAlternativeId(alternativeId);
+          setActiveSubview('alternativeTaskDetail');
+        }}
+        onRefreshAlternatives={() => {
+          updateTaskOverride(activeTask.id, (current) => ({
+            ...current,
+            alternativeOffset: (current?.alternativeOffset ?? 0) + 1,
+          }));
+        }}
+        onUpdateFocusedCompletion={(completion) => {
+          updateTaskOverride(activeTask.id, (current) => ({
+            ...current,
+            completion,
+          }));
+        }}
+        onUpdateProgress={(progress) => {
+          updateTaskOverride(activeTask.id, (current) => ({
+            ...current,
+            progress,
+          }));
+        }}
+        onUpdateTiming={(payload) => {
+          updateTaskOverride(activeTask.id, (current) => ({
+            ...current,
+            timeStart: payload.timeStart,
+            timeEnd: payload.timeEnd,
+            frequency: payload.frequency,
+            hoursPerCycle: payload.hoursPerCycle,
+          }));
+        }}
+        task={activeTask}
+        timeOptions={activeTimeOptions}
+      />
+    );
+  }
+
+  if (activeSubview === 'alternativeTaskDetail' && activeTask && activeAlternative) {
+    return (
+      <AlternativeTaskDetailPage
+        alternative={activeAlternative}
+        key={activeAlternative.id}
+        onBack={() => setActiveSubview('taskDetail')}
+        onReplace={(payload) => {
+          const baseTask = currentBaseTaskMap[activeTask.id];
+
+          updateTaskOverride(activeTask.id, (current) => ({
+            ...current,
+            completion: 'todo',
+            frequency: payload.frequency,
+            hoursPerCycle: payload.hoursPerCycle,
+            progress: activeAlternative.type === 'accumulate' ? 0 : undefined,
+            replacement: {
+              ...activeAlternative,
+              sourceTitle: baseTask?.title ?? activeTask.title,
+              timeStart: payload.timeStart,
+              timeEnd: payload.timeEnd,
+              frequency: payload.frequency,
+              hoursPerCycle: payload.hoursPerCycle,
+            },
+            timeStart: payload.timeStart,
+            timeEnd: payload.timeEnd,
+          }));
+          setActiveSubview('taskDetail');
+          setActiveAlternativeId(null);
+        }}
+        timeOptions={activeTimeOptions}
+      />
+    );
+  }
+
+  if (activeSubview === 'weeklySchedule') {
+    return (
+      <WeeklySchedulePage
+        importedScheduleName={importedScheduleName || '本学期课表'}
+        learningPlan={currentLearningPlan}
+        onBack={() => setActiveSubview('main')}
+        onImportSchedule={() => handleImportSchedule(false)}
+        onPlacementsChange={(placements) => {
+          setWeeklyTaskPlacementsByKey((current) => ({
+            ...current,
+            [currentScheduleStorageKey]: placements,
+          }));
+        }}
+        onTaskPress={(taskId) => openTaskDetail(taskId, 'weeklySchedule')}
+        placements={weeklyTaskPlacementsByKey[currentScheduleStorageKey]}
+        planJob={currentJob}
+        selectedPeriod={selectedPeriod}
+        storageKey={currentScheduleStorageKey}
+      />
+    );
   }
 
   return (
@@ -1186,7 +1731,16 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
               </Text>
               <Text style={styles.learningMetaText}>
                 <Text style={styles.learningMetaLabel}>任务列表总览：</Text>
-                <Text style={styles.learningHintText}>（* 表示重要性）</Text>
+                <Text style={styles.learningHintText}>
+                  （
+                  <Ionicons
+                    color="rgba(12, 94, 63, 1)"
+                    name="star"
+                    size={14}
+                    style={styles.learningHintStarIcon}
+                  />
+                  {' '}表示重要性）
+                </Text>
               </Text>
 
               <View style={styles.taskList}>
@@ -1215,7 +1769,7 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
                           <ImportanceStars value={task.importance} />
                         </View>
 
-                        <Pressable onPress={() => setActiveTask(task)} style={styles.taskDetailButton}>
+                        <Pressable onPress={() => openTaskDetail(task.id, 'main')} style={styles.taskDetailButton}>
                           <Text style={styles.taskDetailButtonText}>查看详情</Text>
                         </Pressable>
                       </View>
@@ -1310,85 +1864,6 @@ export default function PlanPage({ onDetailVisibilityChange }: PlanPageProps) {
         <Ionicons color="rgba(255, 255, 255, 1)" name="share-social-outline" size={18} />
         <Text style={styles.exportFloatingButtonText}>导出规划</Text>
       </Pressable>
-
-      <DetailPageModal
-        onClose={() => setScheduleModalVisible(false)}
-        subtitle={importedScheduleName || '当前学习周期个性化周表'}
-        title="周表页面"
-        visible={scheduleModalVisible}
-      >
-        <View style={styles.modalHeroCard}>
-          <Text style={styles.modalHeroTitle}>{selectedPeriod} 周表安排</Text>
-          <Text style={styles.modalHeroBody}>
-            已基于当前学习计划和导入课表生成建议节奏，后续可继续接入真实课程空档分析与自动排课。
-          </Text>
-        </View>
-
-        {currentSchedule.map((day) => (
-          <View key={day.label} style={styles.scheduleDayCard}>
-            <Text style={styles.scheduleDayLabel}>{day.label}</Text>
-            {day.items.map((item) => (
-              <Text key={`${day.label}-${item}`} style={styles.scheduleItemText}>
-                {item}
-              </Text>
-            ))}
-          </View>
-        ))}
-      </DetailPageModal>
-
-      <DetailPageModal
-        onClose={() => setActiveTask(null)}
-        subtitle={activeTask?.type === 'accumulate' ? '积累型任务' : '整时型任务'}
-        title={activeTask?.title ?? '任务详情'}
-        visible={activeTask !== null}
-      >
-        {activeTask ? (
-          <View>
-            <View style={styles.modalHeroCard}>
-              <Text style={styles.modalHeroTitle}>任务说明</Text>
-              <Text style={styles.modalHeroBody}>{activeTask.detail}</Text>
-            </View>
-
-            <View style={styles.taskDetailMetaCard}>
-              <View style={styles.taskDetailMetaRow}>
-                <Text style={styles.taskDetailMetaLabel}>重要性</Text>
-                <ImportanceStars value={activeTask.importance} />
-              </View>
-              <View style={styles.taskDetailMetaDivider} />
-              <View style={styles.taskDetailMetaRow}>
-                <Text style={styles.taskDetailMetaLabel}>完成情况</Text>
-                <Text style={styles.taskDetailMetaValue}>
-                  {activeTask.type === 'accumulate'
-                    ? activeTask.progress === 100
-                      ? '已完成'
-                      : `${activeTask.progress ?? 0}%`
-                    : activeTask.completion === 'done'
-                      ? '已完成'
-                      : '未完成'}
-                </Text>
-              </View>
-              {activeTask.type === 'focused' ? (
-                <>
-                  <View style={styles.taskDetailMetaDivider} />
-                  <View style={styles.taskDetailMetaRow}>
-                    <Text style={styles.taskDetailMetaLabel}>预估时间段</Text>
-                    <Text style={styles.taskDetailMetaValue}>{activeTask.windowLabel}</Text>
-                  </View>
-                </>
-              ) : null}
-            </View>
-
-            <View style={styles.deliverableCard}>
-              <Text style={styles.deliverableTitle}>建议产出物</Text>
-              {activeTask.deliverables.map((item) => (
-                <Text key={item} style={styles.deliverableItemText}>
-                  {`\u2022 ${item}`}
-                </Text>
-              ))}
-            </View>
-          </View>
-        ) : null}
-      </DetailPageModal>
 
       <Modal animationType="fade" onRequestClose={() => setExportModalVisible(false)} transparent visible={exportModalVisible}>
         <View style={styles.exportModalOverlay}>
@@ -1825,6 +2300,9 @@ const styles = StyleSheet.create({
   learningHintText: {
     color: 'rgba(159, 164, 170, 1)',
     fontWeight: '600',
+  },
+  learningHintStarIcon: {
+    marginHorizontal: 1,
   },
   taskList: {
     marginTop: 10,

@@ -39,6 +39,8 @@ type AgentChatResult = {
   rawAnswer: string;
 };
 
+export type ChatAgentType = 'assessment' | 'assistant';
+
 type WorkflowGapItem = {
   gap_item?: string;
   next_best_action?: string;
@@ -77,6 +79,8 @@ type WorkflowOutput = {
 
 const DEFAULT_AGENT_BASE_URL = 'http://110.40.184.85:9090/v1';
 const DEFAULT_AGENT_USER = 'maojianhui-career-client';
+const DEFAULT_ASSISTANT_OPENING_MESSAGE =
+  '你好，我是 AI 小助手。你可以直接问我目标岗位、简历优化、项目补强、实习准备，或者让我帮你拆下一步行动计划。';
 const DEFAULT_STUDENT_PROFILE = {
   careerAspiration: '希望从 C++ 开发切入，再向后端开发和嵌入式开发延展，优先寻找软件研发类岗位。',
   certificates: ['全国计算机二级', '大学英语四级', '软考程序员'],
@@ -166,38 +170,96 @@ export const DEFAULT_EMPLOYMENT_PROFILE_CONTENT: EmploymentProfileContent = {
 };
 
 function getEnvValue(name: string) {
-  const processRef = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const envMap: Record<string, string | undefined> = {
+    EXPO_PUBLIC_AGENT_AUTHORIZATION: process.env.EXPO_PUBLIC_AGENT_AUTHORIZATION,
+    EXPO_PUBLIC_AGENT_BASE_URL: process.env.EXPO_PUBLIC_AGENT_BASE_URL,
+    EXPO_PUBLIC_ASSESSMENT_AGENT_AUTHORIZATION: process.env.EXPO_PUBLIC_ASSESSMENT_AGENT_AUTHORIZATION,
+    EXPO_PUBLIC_ASSESSMENT_AGENT_BASE_URL: process.env.EXPO_PUBLIC_ASSESSMENT_AGENT_BASE_URL,
+    EXPO_PUBLIC_ASSISTANT_AGENT_AUTHORIZATION: process.env.EXPO_PUBLIC_ASSISTANT_AGENT_AUTHORIZATION,
+    EXPO_PUBLIC_ASSISTANT_AGENT_BASE_URL: process.env.EXPO_PUBLIC_ASSISTANT_AGENT_BASE_URL,
+    EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION: process.env.EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION,
+    EXPO_PUBLIC_WORKFLOW_AGENT_AUTHORIZATION: process.env.EXPO_PUBLIC_WORKFLOW_AGENT_AUTHORIZATION,
+    EXPO_PUBLIC_WORKFLOW_AGENT_BASE_URL: process.env.EXPO_PUBLIC_WORKFLOW_AGENT_BASE_URL,
+  };
 
-  return processRef?.env?.[name]?.trim();
+  return envMap[name]?.trim();
 }
 
 function normalizeAuthorization(rawAuthorization: string) {
   return rawAuthorization.startsWith('Bearer ') ? rawAuthorization : `Bearer ${rawAuthorization}`;
 }
 
-function getChatAgentAuthorization() {
-  const rawAuthorization =
-    getEnvValue('EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION') || getEnvValue('EXPO_PUBLIC_AGENT_AUTHORIZATION');
-
+function getNormalizedAuthorization(rawAuthorization?: string) {
   if (!rawAuthorization) {
     return '';
   }
 
   return normalizeAuthorization(rawAuthorization);
+}
+
+function getAssessmentChatAgentAuthorization() {
+  const rawAuthorization =
+    getEnvValue('EXPO_PUBLIC_ASSESSMENT_AGENT_AUTHORIZATION') ||
+    getEnvValue('EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION') || getEnvValue('EXPO_PUBLIC_AGENT_AUTHORIZATION');
+
+  return getNormalizedAuthorization(rawAuthorization);
+}
+
+function getAssistantChatAgentAuthorization() {
+  const rawAuthorization =
+    getEnvValue('EXPO_PUBLIC_ASSISTANT_AGENT_AUTHORIZATION') ||
+    getEnvValue('EXPO_PUBLIC_ASSESSMENT_AGENT_AUTHORIZATION') ||
+    getEnvValue('EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION') ||
+    getEnvValue('EXPO_PUBLIC_AGENT_AUTHORIZATION');
+
+  return getNormalizedAuthorization(rawAuthorization);
 }
 
 function getWorkflowAgentAuthorization() {
   const rawAuthorization = getEnvValue('EXPO_PUBLIC_WORKFLOW_AGENT_AUTHORIZATION');
 
-  if (!rawAuthorization) {
-    return '';
-  }
-
-  return normalizeAuthorization(rawAuthorization);
+  return getNormalizedAuthorization(rawAuthorization);
 }
 
-function getAgentBaseUrl() {
+function getAgentBaseUrl(...envNames: string[]) {
+  const envBaseUrl = envNames.map((envName) => getEnvValue(envName)).find((value): value is string => Boolean(value));
+
+  if (envBaseUrl) {
+    return envBaseUrl;
+  }
+
   return getEnvValue('EXPO_PUBLIC_AGENT_BASE_URL') || DEFAULT_AGENT_BASE_URL;
+}
+
+function getAssessmentAgentBaseUrl() {
+  return getAgentBaseUrl('EXPO_PUBLIC_ASSESSMENT_AGENT_BASE_URL');
+}
+
+function getAssistantAgentBaseUrl() {
+  return getAgentBaseUrl('EXPO_PUBLIC_ASSISTANT_AGENT_BASE_URL');
+}
+
+function getWorkflowAgentBaseUrl() {
+  return getAgentBaseUrl('EXPO_PUBLIC_WORKFLOW_AGENT_BASE_URL');
+}
+
+function getChatAgentConfig(agentType: ChatAgentType) {
+  if (agentType === 'assistant') {
+    return {
+      authorization: getAssistantChatAgentAuthorization(),
+      authorizationEnvName:
+        'EXPO_PUBLIC_ASSISTANT_AGENT_AUTHORIZATION / EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION / EXPO_PUBLIC_AGENT_AUTHORIZATION',
+      baseUrl: getAssistantAgentBaseUrl(),
+      displayName: 'AI小助手',
+    };
+  }
+
+  return {
+    authorization: getAssessmentChatAgentAuthorization(),
+    authorizationEnvName: 'EXPO_PUBLIC_CHAT_AGENT_AUTHORIZATION / EXPO_PUBLIC_AGENT_AUTHORIZATION',
+    baseUrl: getAssessmentAgentBaseUrl(),
+    displayName: 'AI测评 Agent',
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -269,6 +331,32 @@ function buildSurveyResult() {
     `目前状态：${DEFAULT_STUDENT_PROFILE.currentStatus}`,
     `经济投入：${DEFAULT_STUDENT_PROFILE.investment}`,
     `转专业意愿：${DEFAULT_STUDENT_PROFILE.transferIntent}`,
+  ].join('\n');
+}
+
+function buildAssistantPrompt(query: string) {
+  const normalizedQuery = query.trim();
+
+  return [
+    '你是一名大学生职业规划 AI 助手，请结合以下固定用户背景直接给出更具体、更个性化的建议。',
+    '下面这些信息默认成立，不要重复追问；如果用户在当前对话中提供了更新信息，以用户最新说法为准。',
+    `姓名：${DEFAULT_STUDENT_PROFILE.name}`,
+    `学校：${DEFAULT_STUDENT_PROFILE.school}`,
+    `专业：${DEFAULT_STUDENT_PROFILE.major}`,
+    `职业意向：${DEFAULT_STUDENT_PROFILE.careerAspiration}`,
+    `未来目标：${DEFAULT_STUDENT_PROFILE.futureGoal}`,
+    `当前状态：${DEFAULT_STUDENT_PROFILE.currentStatus}`,
+    `经济投入：${DEFAULT_STUDENT_PROFILE.investment}`,
+    `转专业意愿：${DEFAULT_STUDENT_PROFILE.transferIntent}`,
+    `目标岗位：${DEFAULT_STUDENT_PROFILE.targetJobs.join('、')}`,
+    `技能基础：${DEFAULT_STUDENT_PROFILE.skills.join('、')}`,
+    `证书：${DEFAULT_STUDENT_PROFILE.certificates.join('、')}`,
+    `已有经历：${DEFAULT_STUDENT_PROFILE.experience}`,
+    `个人优势：${DEFAULT_STUDENT_PROFILE.honor}`,
+    '回答时默认围绕 C++ 开发、后端开发、嵌入式开发这几个方向给优先级和可执行建议。',
+    '请尽量输出贴合该用户背景的判断、下一步动作、项目建议、学习顺序或求职策略，而不是泛泛而谈。',
+    '',
+    `用户问题：${normalizedQuery}`,
   ].join('\n');
 }
 
@@ -454,6 +542,50 @@ function parseChatResponse(rawText: string) {
     ended: normalizedAnswer.ended,
     messageId,
     rawAnswer,
+  };
+}
+
+function parseAssistantChatResponse(rawText: string) {
+  const parsedJson = safeJsonParse<Record<string, unknown>>(rawText);
+  const payloads = parsedJson ? [parsedJson] : parseSsePayloads(rawText);
+  let streamedAnswer = '';
+  let finalAnswer = '';
+  let conversationId = '';
+  let messageId = '';
+
+  payloads.forEach((payload) => {
+    if (!isRecord(payload)) {
+      return;
+    }
+
+    const eventName = typeof payload.event === 'string' ? payload.event : '';
+    const answer = extractFinalAnswerFromPayload(payload);
+
+    if ((eventName === 'agent_message' || eventName === 'message') && answer) {
+      streamedAnswer += answer;
+    }
+
+    if (!finalAnswer && answer) {
+      finalAnswer = answer;
+    }
+
+    if (!conversationId && typeof payload.conversation_id === 'string') {
+      conversationId = payload.conversation_id;
+    }
+
+    if (!messageId && typeof payload.message_id === 'string') {
+      messageId = payload.message_id;
+    }
+  });
+
+  const answer = (streamedAnswer || finalAnswer || rawText).trim();
+
+  return {
+    answer: answer || '我已经收到你的问题，你可以继续补充更多背景。',
+    conversationId,
+    ended: false,
+    messageId,
+    rawAnswer: answer,
   };
 }
 
@@ -660,13 +792,24 @@ function mapWorkflowOutputToProfile(output: WorkflowOutput): EmploymentProfileCo
   };
 }
 
-async function requestRawText(pathname: string, authorization: string, init?: RequestInit) {
-
+async function requestRawText({
+  authorization,
+  baseUrl,
+  init,
+  missingAuthorizationMessage,
+  pathname,
+}: {
+  authorization: string;
+  baseUrl: string;
+  init?: RequestInit;
+  missingAuthorizationMessage: string;
+  pathname: string;
+}) {
   if (!authorization) {
-    throw new Error('缺少 Agent 授权，请配置 EXPO_PUBLIC_AGENT_AUTHORIZATION。');
+    throw new Error(missingAuthorizationMessage);
   }
 
-  const response = await fetch(`${getAgentBaseUrl()}${pathname}`, {
+  const response = await fetch(`${baseUrl}${pathname}`, {
     ...init,
     headers: {
       Authorization: authorization,
@@ -683,16 +826,26 @@ async function requestRawText(pathname: string, authorization: string, init?: Re
   return rawText;
 }
 
-export function hasChatAgentAuthorization() {
-  return getChatAgentAuthorization().length > 0;
+export function hasChatAgentAuthorization(agentType: ChatAgentType = 'assessment') {
+  return getChatAgentConfig(agentType).authorization.length > 0;
 }
 
 export function hasWorkflowAgentAuthorization() {
   return getWorkflowAgentAuthorization().length > 0;
 }
 
-export async function fetchAgentOpeningMessage() {
-  const rawText = await requestRawText('/parameters', getChatAgentAuthorization());
+export async function fetchAgentOpeningMessage(agentType: ChatAgentType = 'assessment') {
+  if (agentType === 'assistant') {
+    return DEFAULT_ASSISTANT_OPENING_MESSAGE;
+  }
+
+  const agentConfig = getChatAgentConfig(agentType);
+  const rawText = await requestRawText({
+    authorization: agentConfig.authorization,
+    baseUrl: agentConfig.baseUrl,
+    missingAuthorizationMessage: `缺少${agentConfig.displayName}授权，请配置 ${agentConfig.authorizationEnvName}。`,
+    pathname: '/parameters',
+  });
   const directPayload = safeJsonParse<unknown>(rawText);
   const openingMessage = extractOpeningMessage(directPayload) ?? parseSsePayloads(rawText).map(extractOpeningMessage).find(Boolean);
 
@@ -700,32 +853,51 @@ export async function fetchAgentOpeningMessage() {
 }
 
 export async function sendAgentChatMessage({
+  agentType = 'assessment',
   conversationId,
   previousAgentOutput,
   query,
 }: {
+  agentType?: ChatAgentType;
   conversationId?: string;
   previousAgentOutput?: string;
   query: string;
 }) {
-  const rawText = await requestRawText('/chat-messages', getChatAgentAuthorization(), {
-    body: JSON.stringify({
-      conversation_id: conversationId,
-      inputs: {
-        previous_agent_output: previousAgentOutput ?? '',
-        resume_text: buildResumeText(),
-        student_name: DEFAULT_STUDENT_PROFILE.name,
-        survey_result: buildSurveyResult(),
-        target_role: DEFAULT_STUDENT_PROFILE.targetJobs[0],
-      },
-      query,
-      response_mode: 'streaming',
-      user: DEFAULT_AGENT_USER,
-    }),
-    method: 'POST',
+  const agentConfig = getChatAgentConfig(agentType);
+  const requestBody =
+    agentType === 'assistant'
+      ? {
+          conversation_id: conversationId ?? '',
+          inputs: {},
+          query: buildAssistantPrompt(query),
+          response_mode: 'streaming',
+          user: DEFAULT_AGENT_USER,
+        }
+      : {
+          conversation_id: conversationId,
+          inputs: {
+            previous_agent_output: previousAgentOutput ?? '',
+            resume_text: buildResumeText(),
+            student_name: DEFAULT_STUDENT_PROFILE.name,
+            survey_result: buildSurveyResult(),
+            target_role: DEFAULT_STUDENT_PROFILE.targetJobs[0],
+          },
+          query,
+          response_mode: 'streaming',
+          user: DEFAULT_AGENT_USER,
+        };
+  const rawText = await requestRawText({
+    authorization: agentConfig.authorization,
+    baseUrl: agentConfig.baseUrl,
+    init: {
+      body: JSON.stringify(requestBody),
+      method: 'POST',
+    },
+    missingAuthorizationMessage: `缺少${agentConfig.displayName}授权，请配置 ${agentConfig.authorizationEnvName}。`,
+    pathname: '/chat-messages',
   });
 
-  return parseChatResponse(rawText) as AgentChatResult;
+  return (agentType === 'assistant' ? parseAssistantChatResponse(rawText) : parseChatResponse(rawText)) as AgentChatResult;
 }
 
 export async function generateEmploymentProfileContent() {
@@ -735,17 +907,23 @@ export async function generateEmploymentProfileContent() {
     throw new Error('缺少工作流授权，请配置 EXPO_PUBLIC_WORKFLOW_AGENT_AUTHORIZATION。');
   }
 
-  const rawText = await requestRawText('/workflows/run', workflowAuthorization, {
-    body: JSON.stringify({
-      inputs: {
-        career_aspiration: DEFAULT_STUDENT_PROFILE.careerAspiration,
-        full_profile_json: buildFullProfileJson(),
-        raw_resume_text: buildResumeText(),
-      },
-      response_mode: 'streaming',
-      user: DEFAULT_AGENT_USER,
-    }),
-    method: 'POST',
+  const rawText = await requestRawText({
+    authorization: workflowAuthorization,
+    baseUrl: getWorkflowAgentBaseUrl(),
+    init: {
+      body: JSON.stringify({
+        inputs: {
+          career_aspiration: DEFAULT_STUDENT_PROFILE.careerAspiration,
+          full_profile_json: buildFullProfileJson(),
+          raw_resume_text: buildResumeText(),
+        },
+        response_mode: 'streaming',
+        user: DEFAULT_AGENT_USER,
+      }),
+      method: 'POST',
+    },
+    missingAuthorizationMessage: '缺少工作流授权，请配置 EXPO_PUBLIC_WORKFLOW_AGENT_AUTHORIZATION。',
+    pathname: '/workflows/run',
   });
   const workflowOutput = parseWorkflowResponse(rawText);
 

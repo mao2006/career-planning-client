@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Feather from '@expo/vector-icons/Feather';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   Animated,
   Image,
+  Linking,
   Modal,
   PanResponder,
   Pressable,
@@ -18,8 +19,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { FeedCard } from './feed-data';
+import { HOME_ROLE_LABELS } from './home-role-config';
 
-const POSITION_OPTIONS = ['岗位一', '岗位二', '岗位三', '探索方向'] as const;
+const POSITION_OPTIONS = [...HOME_ROLE_LABELS];
 const FREQUENCY_OPTIONS = ['每周', '每天'] as const;
 const WEEKDAY_LABELS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 
@@ -141,12 +143,13 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const [isCollected, setIsCollected] = useState(false);
+  const [hasJoinedPlan, setHasJoinedPlan] = useState(false);
   const [isPlanModalVisible, setIsPlanModalVisible] = useState(false);
   const [isShareModalVisible, setIsShareModalVisible] = useState(false);
   const [isRoleMenuVisible, setIsRoleMenuVisible] = useState(false);
   const [isSchedulePickerVisible, setIsSchedulePickerVisible] = useState(false);
   const [isFrequencyPanelVisible, setIsFrequencyPanelVisible] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<(typeof POSITION_OPTIONS)[number]>('岗位一');
+  const [selectedRole, setSelectedRole] = useState(post.roleLabel);
   const [selectedFrequency, setSelectedFrequency] = useState<FrequencyOption>('每周');
   const [selectedHours, setSelectedHours] = useState(3);
   const [calendarYear, setCalendarYear] = useState(2026);
@@ -169,6 +172,14 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
       )}\n${selectedFrequency}${selectedHours}小时`
     : '请选择任务完成时间';
   const panelWidth = Math.min(screenWidth - 56, 334);
+
+  useEffect(() => {
+    setSelectedRole(post.roleLabel);
+  }, [post.roleLabel]);
+
+  const handleOpenSource = () => {
+    Linking.openURL(post.sourceUrl);
+  };
 
   const closePlanModal = () => {
     setIsPlanModalVisible(false);
@@ -281,9 +292,12 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
         >
           <View style={[styles.articleWrap, { width: contentWidth }]}>
             <Text style={styles.title}>{post.title}</Text>
-            <Text style={styles.metaText}>
-              {post.publishDate} {post.author}
-            </Text>
+            <Pressable onPress={handleOpenSource} style={({ pressed }) => [styles.sourceButton, pressed && styles.sourceButtonPressed]}>
+              <Text numberOfLines={1} style={styles.sourceButtonText}>
+                来源：{post.author}
+              </Text>
+              <Ionicons color="rgba(92, 149, 144, 1)" name="open-outline" size={16} />
+            </Pressable>
 
             <LinearGradient
               colors={post.coverGradient}
@@ -291,7 +305,7 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
               start={{ x: 0, y: 0 }}
               style={[styles.coverFrame, { height: coverHeight }]}
             >
-              <Image resizeMode="contain" source={post.cover} style={styles.coverImage} />
+              <Image resizeMode="cover" source={post.cover} style={styles.coverImage} />
             </LinearGradient>
 
             <View style={styles.articleBody}>
@@ -300,6 +314,10 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
                   {paragraph}
                 </Text>
               ))}
+
+              <Pressable onPress={handleOpenSource} style={({ pressed }) => [styles.readSourceButton, pressed && styles.readSourceButtonPressed]}>
+                <Text style={styles.readSourceButtonText}>查看英文原文</Text>
+              </Pressable>
             </View>
           </View>
         </ScrollView>
@@ -323,8 +341,8 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
             />
             <ActionButton
               emphasized
-              icon="add"
-              label="加入我的规划"
+              icon={hasJoinedPlan ? 'checkmark-circle' : 'add'}
+              label={hasJoinedPlan ? '已加入我的规划' : '加入我的规划'}
               onPress={() => {
                 setIsShareModalVisible(false);
                 setIsPlanModalVisible(true);
@@ -349,7 +367,7 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
           {!isScheduleFlowVisible ? (
             <View style={[styles.planModalWrap, { paddingTop: insets.top + 12 }]}>
               <View style={[styles.planCard, { width: Math.min(screenWidth - 32, 398) }]}>
-                <Text style={styles.planTitle}>加入我的规划</Text>
+                <Text style={styles.planTitle}>{hasJoinedPlan ? '已加入我的规划' : '加入我的规划'}</Text>
 
                 <View style={styles.planFormCard}>
                   <View style={styles.planRow}>
@@ -445,7 +463,13 @@ export default function PostDetailPage({ onBack, post }: PostDetailPageProps) {
                     <Text style={styles.planValueText}>{post.author}</Text>
                   </View>
 
-                  <Pressable onPress={closePlanModal} style={({ pressed }) => [styles.confirmButton, pressed && styles.confirmButtonPressed]}>
+                  <Pressable
+                    onPress={() => {
+                      setHasJoinedPlan(true);
+                      closePlanModal();
+                    }}
+                    style={({ pressed }) => [styles.confirmButton, pressed && styles.confirmButtonPressed]}
+                  >
                     <Text style={styles.confirmButtonText}>确认</Text>
                   </Pressable>
 
@@ -739,6 +763,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: 'rgba(161, 166, 171, 1)',
   },
+  sourceButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(235, 245, 243, 1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sourceButtonPressed: {
+    opacity: 0.92,
+  },
+  sourceButtonText: {
+    maxWidth: 260,
+    marginRight: 6,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: 'rgba(93, 126, 122, 1)',
+  },
   coverFrame: {
     marginTop: 18,
     borderRadius: 12,
@@ -747,8 +793,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   coverImage: {
-    width: '88%',
-    height: '88%',
+    width: '100%',
+    height: '100%',
   },
   articleBody: {
     marginTop: 18,
@@ -758,6 +804,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 33,
     color: 'rgba(62, 66, 70, 1)',
+  },
+  readSourceButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(78, 166, 157, 1)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  readSourceButtonPressed: {
+    opacity: 0.92,
+  },
+  readSourceButtonText: {
+    fontSize: 14,
+    lineHeight: 16,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   actionBarWrap: {
     position: 'absolute',

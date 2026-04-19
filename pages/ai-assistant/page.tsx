@@ -41,12 +41,10 @@ const MAIN_TAB_BAR_HEIGHT = 74;
 const TAB_BAR_GAP = 5;
 const COMPOSER_CONTROL_HEIGHT = 46;
 const COMPOSER_WRAP_HEIGHT = 66;
-const AUTO_REPLY_DELAY_MS = 360;
 const ASSESSMENT_THINKING_DELAY_MS = 2000;
 const ASSESSMENT_STREAM_INTERVAL_MS = 34;
 const ASSESSMENT_STREAM_CHUNK_SIZE = 2;
 const REMOTE_THINKING_TEXT = 'AI Agent 正在分析你的输入...';
-const USER_BASELINE_SUMMARY = '你目前处在职业探索阶段，学习吸收和沟通协同能力相对更突出，也需要继续补足实践证明和岗位聚焦。';
 const ASSESSMENT_SCRIPT_STEPS: AssessmentScriptStep[] = [
   {
     prompt: '请告诉我你的大致求职方向',
@@ -156,39 +154,6 @@ function shouldShowTimestamp(messages: ChatMessage[], index: number) {
   return crossedDay || currentTime - previousTime >= 20 * 60 * 1000;
 }
 
-function createInitialMessages(now = new Date()): ChatMessage[] {
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  yesterday.setHours(20, 18, 0, 0);
-
-  const todayQuestion = new Date(now);
-  todayQuestion.setHours(Math.max(now.getHours() - 1, 9), 6, 0, 0);
-
-  const todayAnswer = new Date(todayQuestion.getTime() + 2 * 60 * 1000);
-
-  return [
-    {
-      id: 'assistant-yesterday',
-      role: 'assistant',
-      text: '我已经结合你的职业规划场景准备好了回答方式。你可以直接问目标岗位、实习准备、作品集拆解，或者让我把下一步行动排成一周计划。',
-      createdAt: yesterday,
-    },
-    {
-      id: 'user-today',
-      role: 'user',
-      text: '如果我现在还不确定具体岗位，第一步应该先做什么？',
-      createdAt: todayQuestion,
-    },
-    {
-      id: 'assistant-today',
-      role: 'assistant',
-      text:
-        '先不要急着广撒网。建议你先圈出 2 个最想尝试的方向，再分别写下这两个方向最常见的任务、需要的证明材料，以及你已经具备的部分。这样你会更快看清应该先补技能、补项目，还是先做一次小实习验证。',
-      createdAt: todayAnswer,
-    },
-  ];
-}
-
 function createAssessmentOpeningMessage(now = new Date()): ChatMessage[] {
   return [
     {
@@ -200,27 +165,12 @@ function createAssessmentOpeningMessage(now = new Date()): ChatMessage[] {
   ];
 }
 
-function buildAssistantReply(prompt: string) {
-  const normalizedPrompt = prompt.trim();
-  const intro = `结合你当前的基础情况来看，${USER_BASELINE_SUMMARY}`;
-
-  if (/岗位|方向|适合|选择/.test(normalizedPrompt)) {
-    return `${intro}\n\n如果你现在还在收敛方向，先只保留 2 个最想尝试的岗位，然后分别回答三件事：它每天在做什么、你现阶段最缺什么证明、两周内能做哪一个最小验证。\n\n你先把这 2 个岗位发给我，我可以继续帮你拆成更具体的行动表。`;
+function buildRemoteErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return `AI小助手接口请求失败：${error.message}`;
   }
 
-  if (/简历|面试|自我介绍/.test(normalizedPrompt)) {
-    return `${intro}\n\n这类问题先抓“证明力”。简历和面试内容不要只写做过什么，要把问题、动作、结果写清楚。\n\n你可以优先准备 3 段经历：一次课程项目、一次实践协作、一次主动解决问题的例子。把原文发给我，我可以直接帮你改成更像求职表达。`;
-  }
-
-  if (/实习|项目|作品|经历/.test(normalizedPrompt)) {
-    return `${intro}\n\n现阶段最有效的补强方式通常不是再听一轮课，而是补一个能被看到的项目或经历。建议你先选一个和目标方向最接近的小题目，用 7 天做出可以展示的结果。\n\n如果你愿意，我可以下一条直接帮你把这个项目拆成每天的任务。`;
-  }
-
-  if (/学习|计划|安排|怎么做|下一步/.test(normalizedPrompt)) {
-    return `${intro}\n\n你现在更适合“小步快跑”的推进方式。先把接下来一周分成三块：信息收集、能力补强、结果沉淀。\n\n比较稳妥的顺序是：先确认目标，再补最关键的一项能力，最后把过程沉淀成简历/作品可展示内容。`;
-  }
-
-  return `${intro}\n\n你这条问题我建议先从“目标、差距、动作”三个层次来拆。目标是你想靠近什么岗位，差距是当前最缺哪一项证明，动作是这一周最小但能落地的一步。\n\n如果你愿意，再告诉我你最纠结的是岗位、简历、实习还是学习安排，我可以继续给你更具体的建议。`;
+  return 'AI小助手接口请求失败，请检查当前网络、baseUrl 和 Authorization 配置。';
 }
 
 function renderInlineRichText(text: string, keyPrefix: string) {
@@ -314,7 +264,8 @@ function RichTextMessage({
 
 export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPageProps) {
   const standaloneMode = mode === 'standalone';
-  const agentEnabled = hasChatAgentAuthorization();
+  const remoteAgentType = standaloneMode ? 'assessment' : 'assistant';
+  const agentEnabled = hasChatAgentAuthorization(remoteAgentType);
   const [draft, setDraft] = useState('');
   const [assessmentStep, setAssessmentStep] = useState(0);
   const [conversationId, setConversationId] = useState('');
@@ -323,7 +274,7 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    standaloneMode ? createAssessmentOpeningMessage() : createInitialMessages()
+    standaloneMode ? createAssessmentOpeningMessage() : []
   );
   const [previousAgentOutput, setPreviousAgentOutput] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
@@ -331,7 +282,7 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nextMessageIdRef = useRef(standaloneMode ? 2 : 4);
+  const nextMessageIdRef = useRef(standaloneMode ? 2 : 1);
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const contentWidth = Math.min(screenWidth - 28, 420);
@@ -341,9 +292,7 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
   const currentAssessmentStep = standaloneMode ? ASSESSMENT_SCRIPT_STEPS[assessmentStep] : undefined;
   const standaloneInputLocked = standaloneMode && !agentEnabled && !currentAssessmentStep;
   const composerBottomSpacing = keyboardVisible
-    ? standaloneMode
-      ? keyboardHeight + 8
-      : TAB_BAR_GAP
+    ? keyboardHeight + 8
     : standaloneMode
       ? Math.max(insets.bottom + 10, 16)
       : MAIN_TAB_BAR_HEIGHT + tabBarBottomPadding + TAB_BAR_GAP;
@@ -392,13 +341,13 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
   }, []);
 
   useEffect(() => {
-    if (!agentEnabled) {
+    if (!agentEnabled && remoteAgentType === 'assessment') {
       return;
     }
 
     let active = true;
 
-    fetchAgentOpeningMessage()
+    fetchAgentOpeningMessage(remoteAgentType)
       .then((openingMessage) => {
         if (!active || !openingMessage) {
           return;
@@ -420,7 +369,7 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
     return () => {
       active = false;
     };
-  }, [agentEnabled]);
+  }, [agentEnabled, remoteAgentType]);
 
   const appendAssistantMessage = (text: string, state: ChatMessageState = 'default') => {
     const id = `message-${nextMessageIdRef.current++}`;
@@ -543,6 +492,7 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
 
       try {
         const result = await sendAgentChatMessage({
+          agentType: remoteAgentType,
           conversationId: nextConversationId || undefined,
           previousAgentOutput: nextPreviousAgentOutput,
           query: trimmedDraft,
@@ -560,12 +510,23 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
         });
 
         return;
-      } catch {
+      } catch (error) {
         removeMessage(thinkingMessageId);
+
+        if (!standaloneMode) {
+          appendAssistantMessage(buildRemoteErrorMessage(error));
+          setIsAssistantResponding(false);
+          return;
+        }
       }
     }
 
     setIsAssistantResponding(false);
+
+    if (!standaloneMode) {
+      appendAssistantMessage('AI小助手接口未启用，请先检查运行环境中的授权配置。');
+      return;
+    }
 
     if (standaloneMode) {
       if (!currentAssessmentStep) {
@@ -589,11 +550,6 @@ export default function AiAssistantPage({ mode = 'tab', onBack }: AiAssistantPag
 
       return;
     }
-
-    replyTimerRef.current = setTimeout(() => {
-      appendAssistantMessage(buildAssistantReply(trimmedDraft));
-      replyTimerRef.current = null;
-    }, AUTO_REPLY_DELAY_MS);
   };
   const sendDisabled = draft.trim().length === 0 || isAssistantResponding || standaloneInputLocked;
 

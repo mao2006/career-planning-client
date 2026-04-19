@@ -274,16 +274,15 @@ export default function EmploymentProfileScreen({
     loadEmploymentProfile();
   }, []);
 
-  const subtitleText =
-    loadState === 'loading'
-      ? 'AI 正在根据当前档案生成最新画像'
-      : loadState === 'success'
-        ? 'AI 已根据当前档案生成第一版评估'
-        : agentEnabled
-          ? '当前展示上一次可用画像，可点击右上角重新生成'
-          : '未配置 Agent 授权，当前展示本地画像模板';
-  const retryButtonText =
-    loadState === 'loading' ? '生成中...' : agentEnabled ? '重新进行AI评估' : '待接入Agent';
+  const retryButtonText = loadState === 'loading' ? '生成中...' : '重新测评';
+
+  const handleRetryPress = () => {
+    if (!agentEnabled || loadState === 'loading') {
+      return;
+    }
+
+    loadEmploymentProfile();
+  };
 
   return (
     <LinearGradient
@@ -302,7 +301,8 @@ export default function EmploymentProfileScreen({
           styles.headerShell,
           {
             height: headerHeight,
-            paddingTop: insets.top + 14 * scaleY,
+            paddingTop: insets.top + 12 * scaleY,
+            paddingBottom: 10 * scaleY,
             paddingHorizontal: HEADER_SIDE_MARGIN * scaleX,
           },
         ]}
@@ -319,24 +319,13 @@ export default function EmploymentProfileScreen({
           >
             就业能力画像
           </Text>
-          <Text
-            style={[
-              styles.pageSubtitleText,
-              {
-                fontSize: 12 * textScale,
-                lineHeight: 17 * textScale,
-              },
-            ]}
-          >
-            {subtitleText}
-          </Text>
         </View>
 
         <Pressable
-          disabled={!agentEnabled || loadState === 'loading'}
+          disabled={loadState === 'loading'}
           hitSlop={8}
-          onPress={loadEmploymentProfile}
-          style={[styles.retryButton, (!agentEnabled || loadState === 'loading') && styles.retryButtonDisabled]}
+          onPress={handleRetryPress}
+          style={[styles.retryButton, loadState === 'loading' && styles.retryButtonDisabled]}
         >
           <MaterialIcons color="rgba(34, 152, 142, 1)" name="autorenew" size={16 * textScale} />
           <Text
@@ -755,7 +744,7 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: 'rgba(236, 249, 246, 0.78)',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -763,6 +752,7 @@ const styles = StyleSheet.create({
   },
   headerTitleWrap: {
     flex: 1,
+    justifyContent: 'center',
     paddingRight: 12,
   },
   pageTitle: {
@@ -777,9 +767,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   retryButton: {
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 4,
+    minHeight: 36,
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 999,

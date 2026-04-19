@@ -60,11 +60,25 @@ const PROFILE_FIELDS = [
 ] as const;
 const TRANSFER_OPTIONS = ['有', '没有', '不确定'] as const;
 const INVESTMENT_OPTIONS = [
-  '偏向低成本/免费资源',
-  '可适当预算投入',
-  '可灵活支持长期提升',
+  '偏向低成本/免费资源(以自学、校内资源、免费网课为主)',
+  '可适当预算投入(可接受少量付费课程、证书或参与短期交流项目)',
+  '可灵活支持长期提升(可接受付费培训、高端证书、留学或背景提升项目)',
 ] as const;
 const FUTURE_GOAL_OPTIONS = ['就业(找工作)', '考研/升学', '考公/事业单位', '出国深造', '自主创业', '未确定'] as const;
+const DEFAULT_FORM_VALUES: FormValues = {
+  certificate: '全国计算机二级、大学英语四级、软考程序员',
+  email: 'jingxiaohong@nn.com',
+  experience: '已完成数据结构课程设计、1 次团队协作开发、1 个 Linux + C++ mini 项目，具备持续学习和工程化落地能力。',
+  futureGoal: '就业(找工作)',
+  honor: '学习吸收快、执行节奏稳，具备工程实现型潜力，适合从研发主线切入。',
+  investment: '偏向低成本/免费资源(以自学、校内资源、免费网课为主)',
+  major: '车辆工程',
+  name: '毛健辉',
+  school: '浙江工业大学',
+  skill: 'C++ / C、数据结构与算法、Linux 开发环境、Git 协作、调试定位、计算机网络基础',
+  targetJob: 'C++ 开发工程师 / 后端开发工程师 / 嵌入式开发工程师',
+  transferIntent: '没有',
+};
 
 type EditorFieldRowProps = {
   isLast?: boolean;
@@ -202,20 +216,7 @@ export default function MinePage({ onDetailVisibilityChange }: MinePageProps) {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<ExpandableSectionKey | null>(null);
   const [activeSelectorKey, setActiveSelectorKey] = useState<MoreSelectorKey | null>(null);
-  const [formValues, setFormValues] = useState<FormValues>({
-    certificate: '',
-    email: 'jingxiaohong@nn.com',
-    experience: '',
-    futureGoal: '',
-    honor: '',
-    investment: '',
-    major: '',
-    name: '精小弘',
-    school: '',
-    skill: '',
-    targetJob: '',
-    transferIntent: null,
-  });
+  const [formValues, setFormValues] = useState<FormValues>(DEFAULT_FORM_VALUES);
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const contentWidth = Math.min(screenWidth - 32, 360);
